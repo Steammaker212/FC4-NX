@@ -245,3 +245,17 @@ pistol/animals, screen-space blocky/checkerboard tiles, black terrain patches, m
 working. game-compatibility #969: `readback_resolve = true` fixes dark/black graphics. For this port: the game reads
 resolved render targets back on the CPU (Renut's renderer must support resolve readback); dialogue is likely XMA
 (check the APU path once in game). These are Xenia's bugs, not this port's; they are hints for the renderer phase.
+
+## Boot crash FIXED: ranged physical allocations one page high (2026-11-09, boot16-18) -> title screen
+
+- boot16 trace: at start the main thread allocates physical windows by exact range, e.g. MmAllocatePhysicalMemoryEx
+  size 0x6000 min 0x1905B000 max 0x19060FFF. The kernel returned 0xF905B000 = physical 0x1905C000-0x19061FFF (the
+  0xE0000000 heap is physical +0x1000): one page above the window, past max. Every ranged block did this.
+- Cause: BaseHeap::AllocRange rounded the inclusive high bound UP to the alignment (0x19010FFF -> 0x19011000), so the
+  top-down search could start one page higher. (Xenia's memory.cc has the same line.)
+- boot17: the overwriting texture copy is exactly that window (sub_82476528 dst 0xF905B000 src 0x40645A68 size
+  0x6000, lr 827B7F8C); the job pointer at 0x4001DE34 pointed into it (the game's physical arithmetic disagreed with
+  where the block really was).
+- Fix (sdk/src/system/xmemory.cpp, BaseHeap::AllocRange): high bound inclusive, not rounded; only pages ending at or
+  below it count. boot18: no access violation in 150 s, textures loading, **title screen "PRESS A TO START"**
+  (out/pc_runs/boot18/captura_009_0135s.png), XMA audio registers being written.

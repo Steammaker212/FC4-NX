@@ -199,6 +199,19 @@ REX_HOOK_RAW(sub_83AD5350) {
   __imp__sub_83AD5350(ctx, base);
 }
 
+
+// boot15: the texture copy that overwrites the job objects (sub_82476528: dest r3, src r4, size r5, then 128-byte
+// chunks). Logs the arguments and a host backtrace of every call whose destination range covers fc4_watch_addr.
+REX_EXTERN(__imp__sub_82476528);
+REX_HOOK_RAW(sub_82476528) {
+  const uint32_t watch = static_cast<uint32_t>(std::strtoul(REXCVAR_GET(fc4_watch_addr).c_str(), nullptr, 16));
+  if (watch && ctx.r3.u32 <= watch && watch - ctx.r3.u32 < ctx.r5.u32)
+    REXLOG_WARN("[fc4 watch] texture copy over watch: dst {:08X} src {:08X} size {:X} r6 {:08X} r7 {:08X} r8 {:08X} "
+                "lr {:08X}; stack:{}", ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32, ctx.r7.u32, ctx.r8.u32,
+                static_cast<uint32_t>(ctx.lr), fc4::watch::HostBacktrace());
+  __imp__sub_82476528(ctx, base);
+}
+
 #else
 namespace fc4::watch {
 void Start() {}

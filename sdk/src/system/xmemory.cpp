@@ -1606,13 +1606,18 @@ bool BaseHeap::AllocRange(uint32_t low_address, uint32_t high_address, uint32_t 
   alignment = rex::round_up(alignment, page_size_);
   uint32_t page_count = get_page_count(size, page_size_, page_size_shift_);
   low_address = std::max(heap_base_, rex::align(low_address, alignment));
-  high_address = std::min(heap_base_ + (heap_size_ - 1), rex::align(high_address, alignment));
-  if (high_address < low_address) {
+  // fc4-nx (2026-11-09): high_address is the inclusive last byte (MmAllocatePhysicalMemoryEx's max). It was rounded UP
+  // to the alignment, so max 0x19010FFF admitted page 0x19011000 and a top-down search returned the block one page above
+  // the requested physical range. Far Cry 4 asks for exact physical windows (0x1905B000-0x19060FFF) and later copies a
+  // texture over its job objects there (docs/fc4-notes.md, boot15-17). Only pages that end at or below it count.
+  high_address = std::min(heap_base_ + (heap_size_ - 1), high_address);
+  if (high_address < low_address || ((uint64_t(high_address) - heap_base_ + 1) >> page_size_shift_) == 0) {
     REXSYS_ERROR("BaseHeap::Alloc invalid requested range");
     return false;
   }
   uint32_t low_page_number = (low_address - heap_base_) >> page_size_shift_;
-  uint32_t high_page_number = (high_address - heap_base_) >> page_size_shift_;
+  uint32_t high_page_number =
+      uint32_t((uint64_t(high_address) - heap_base_ + 1) >> page_size_shift_) - 1;
   low_page_number = std::min(uint32_t(page_table_.size()) - 1, low_page_number);
   high_page_number = std::min(uint32_t(page_table_.size()) - 1, high_page_number);
   if (high_page_number < low_page_number) {
