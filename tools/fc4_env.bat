@@ -4,6 +4,7 @@ rem   - VS 18 Build Tools (MSVC 14.51 + Windows SDK) via vcvars64, with its bund
 rem   - LLVM clang from C:\Program Files\LLVM (devkitPro's msys2 clang64 package is not installed here)
 rem   - Python 3.15 at C:\Python315
 set "VSROOT=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools"
+set "PATH=C:\Program Files (x86)\Microsoft Visual Studio\Installer;%PATH%"
 call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 set "PATH=%VSROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;%VSROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja;C:\Python315;%PATH%"
 set "LLVM_BIN=C:/Program Files/LLVM/bin"

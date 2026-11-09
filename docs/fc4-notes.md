@@ -73,10 +73,13 @@ Scale against the base: Katamari's code range was 8 MiB with 37,763 functions; F
 (Katamari: 60 MB for 8 MiB of PPC with 1,500 machine copies).
 
 - **setjmp `0x83FBE870`, longjmp `0x83FC0A80`** (by shape; `app/renut_config.toml` has the instructions).
-- **A fiber switch** at `0x83F4EAC0` (saves r1, r14-r31, f, v into the block at `*(*(r13+0x100)+0x164)`, then loads
-  another context; one caller, `0x83F46140`): XAPI's `SwitchToFiber`, linked statically. If the game runs fibers at run
-  time, guest fibers need host context switching (the SDK has `src/core/fiber_win32.cpp`, `kernel/crt/threading.cpp`).
-  To check on the first PC boot.
+- **Fibers: the game uses them.** XAPI's fiber functions are linked statically: ConvertThreadToFiber `0x83F45F20`,
+  ConvertFiberToThread `0x83F45FB0`, CreateFiber `0x83F46000`, DeleteFiber `0x83F460E0`, SwitchToFiber `0x83F46140`
+  (`b 0x83F4EAC0`, the body that swaps r1 / LR / non-volatiles through `*(*(r13+0x100)+0x164)`). Callers: a fiber
+  scheduler at `0x83ACF2C0`-`0x83ADD49C` (ConvertThreadToFiber + CreateFiber at `0x83ADD434` / `0x83ADD450`, four
+  SwitchToFiber sites). Recompiled code cannot swap the guest stack in place, so the five are hooked to the SDK's host
+  fibers (`[rexcrt]` in `app/config/renut_crt.toml`; `sdk/src/kernel/crt/threading.cpp`, `core/fiber_*.cpp`). On the
+  Switch that is `fiber_switch.cpp`: a fiber switch costs a host context switch; count them on the first runs.
 
 ## Shaders
 
@@ -100,4 +103,12 @@ The XDK's code sits at the end of `.text` (`0x83Fxxxxx`, with setjmp/longjmp and
 
 ## Code generation
 
-First run 2026-11-09 without setjmp/longjmp (found during the run, added for the next one).
+Each run takes 20-24 minutes on this PC (i9-12900K), single-threaded in the analysis phases (GapFill is most of it).
+
+- **Run 1** (1,216 s): failed validation, 18 "target not in any function" at 13 addresses, every one a function start
+  after a terminator reached only by thunk tail jumps (`app/config/renut_funcs.toml`, each with its instructions).
+- **Run 2** (1,416 s, setjmp / longjmp set): **passed**. 947 files, 507 MB of C++ (Katamari: 269 files, ~220 MB). One
+  warning: the unresolved `b 0x83F4EAC0` in SwitchToFiber, answered by the rexcrt fiber hooks (above).
+- Not run yet: `tools/pointer_fixpoint.py` and `tools/gap_sweep.py` (functions only reachable through data pointers or
+  computed addresses; Katamari needed 111 + 85) and `tools/switch_check.py` (jump tables). Each pass of the first two
+  is a scratch codegen plus a real one, so about 45 minutes a pass here.

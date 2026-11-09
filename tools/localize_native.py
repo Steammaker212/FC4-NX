@@ -1043,6 +1043,9 @@ def write_list(entries, out_dir, bulk=()):
         desc = ('Native localized copy of %s: %s' % (root, what)).replace('\\', '/').replace('"', "'")
         inc.append(f'BANJO_HOT_HOOK({root}, {rid}, {key_of(root, opts)}, {"false" if opts.get("off") else "true"}, '
                    f'{slot}, "{desc}")')
+    # fc4-nx (2026-11-09): with empty lists no header is written, so out_dir may not exist yet; the shard and list
+    # files are still needed (the shard .cpp files include them).
+    os.makedirs(out_dir, exist_ok=True)
     # The bulk list over the shards: the largest headers first, each to the shard with the fewest bytes so far.
     shards = [[0, []] for _ in range(SHARDS)]
     for root, opts, what in sorted(bulk, key=lambda e: -os.path.getsize(os.path.join(out_dir, f'n_{identifier(e[0])}.h'))):

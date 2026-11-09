@@ -1,2 +1,22 @@
-# katamari-nx: the SDK's native CRT is not used (not included in the codegen; read by tools/post_codegen.py).
+# fc4-nx: the SDK's rexcrt hooks this game needs (sdk/src/kernel/crt). Included in the codegen (renut_config.toml)
+# and read by tools/post_codegen.py as hooked addresses.
+#
+# XAPI fibers (2026-11-09). Far Cry 4 runs a fiber scheduler (ConvertThreadToFiber / CreateFiber at 0x83ADD434 /
+# 0x83ADD450, SwitchToFiber from 0x83ACF408, 0x83AD1520, 0x83ADCEB8, 0x83ADD49C). XAPI's SwitchToFiber swaps r1, LR and
+# the non-volatile registers (its body at 0x83F4EAC0 saves into *(*(r13+0x100)+0x164) and loads the target's), which
+# recompiled code cannot do in place: the SDK runs guest fibers on host fibers (kernel/crt/threading.cpp,
+# core/fiber_*.cpp). Identified in the image (tools/ppc_dis.py, out/fiber_dis.txt):
+#   ConvertThreadToFiber 0x83F45F20: fails with SetLastError(1280, ERROR_ALREADY_FIBER) if the thread's fiber field
+#                        +0x164 is set, else allocates the context and stores it there.
+#   ConvertFiberToThread 0x83F45FB0: reads and clears +0x164, frees the context.
+#   CreateFiber          0x83F46000: (stack size, start address, parameter): 0xA50-byte context, stack rounded to 4 KB,
+#                        16 KB minimum (0: the thread's default), entry stub 0x83F4EAB0, parameter at +0.
+#   DeleteFiber          0x83F460E0: the current fiber -> ConvertFiberToThread + ExitThread(1), else frees its stack
+#                        and context.
+#   SwitchToFiber        0x83F46140: `b 0x83F4EAC0`.
 [rexcrt]
+ConvertThreadToFiber = 0x83F45F20
+ConvertFiberToThread = 0x83F45FB0
+CreateFiber = 0x83F46000
+DeleteFiber = 0x83F460E0
+SwitchToFiber = 0x83F46140

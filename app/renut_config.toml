@@ -8,6 +8,7 @@
 includes = [
 "config/renut_funcs.toml",
 "config/renut_hooks.toml",
+"config/renut_crt.toml",
 "overrides.toml",
 ]
 
