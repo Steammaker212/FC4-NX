@@ -1,0 +1,51 @@
+# fc4-nx (Far Cry 4, title 555308CA, XDK 2.0.21256, game.xex = "default.exe") - ReXGlue codegen configuration.
+# The project keeps banjo-nx's internal name "renut" (generated/renut_*.h, the renut / renut_recomp targets) so the
+# base's CMake, post-codegen passes and renderer glue work unchanged (see docs/fc4-notes.md, "Decisions").
+#
+# NOTE: the disc's default.xex is the XUI *installer* (original PE name installer.exe, 2.2 MiB image). The game is
+# game.xex (original PE name default.exe, 35.6 MiB image, entry 0x83F3F630). Codegen runs on game.xex.
+
+includes = [
+"config/renut_funcs.toml",
+"config/renut_hooks.toml",
+"overrides.toml",
+]
+
+# Codegen keys that change how the C++ is written, not what the guest sees (banjo-nx / katamari-nx: no per-game
+# audit needed).
+cr_as_local = true
+ctr_as_local = true
+xer_as_local = true
+reserved_as_local = true
+skip_msr = true
+dform_disp_split = true
+fctiwz_inline = true
+fcti_inline = true
+dcbt_prefetch = true
+rotate_word_shifts = true
+fp_compares_modeless = true
+fp_mode_lookahead = true
+fp_mode_lookahead_past_branch = true
+fp_copy_pairs = true
+fp_copy_forwarding = true
+div_inline = true
+fp_moves_modeless = true
+
+# NOT YET ENABLED for Far Cry 4 - each needs its own audit on a codegen without it (katamari-nx's renut_config.toml
+# and docs/codegen-enhancements.md describe the audits):
+#   non_volatile_as_local  (tools/read_before_write.py --noreturn=<longjmp>)
+#   elide_lr_stores        (check the CRT's exception helpers that read LR)
+#   non_argument_as_local  (tools/non_argument_audit.py; MSVC unwind funclets take r12)
+
+# setjmp / longjmp by shape (tools/fc4_image_scan.py jmpbuf + a pattern search, 2026-11-09):
+#   setjmp  0x83FBE870: lis r4,0x842F; lwz r0,0xFD4(r4); cmpwi; mtctr; bnectr (hook word), then mflr/mfcr and
+#           stfd f14-f31 at 0x00-0x88(r3), std r13-r31 at 0x98-0x128(r3), stvx128 v?? from 0x140(r3). 14 bl callers.
+#   longjmp 0x83FC0A80: mflr; stwu r1,-0x50; checks the buffer word at 0x138(r3), then lfd f14,0(r7) / f15,8(r7)...
+setjmp_address = 0x83FBE870
+longjmp_address = 0x83FC0A80
+
+project_name = "renut"
+file_path = "assets/game.xex"
+out_directory_path = "generated"
+
+[functions]

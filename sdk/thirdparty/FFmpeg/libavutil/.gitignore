@@ -1,0 +1,5 @@
+/avconfig.h
+/ffversion.h
+# fc4-nx: recreated generated headers, committed so a fresh clone builds
+!/avconfig.h
+!/ffversion.h

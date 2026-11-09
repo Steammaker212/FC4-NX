@@ -1,0 +1,4 @@
+# fc4-nx: function boundaries found by the analysis tools and jump tables, each with its evidence.
+# Empty: Katamari's entries removed (stale addresses from another game block copies and mislead the scanner).
+
+[functions]

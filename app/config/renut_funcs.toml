@@ -1,0 +1,19 @@
+# fc4-nx: named functions and function boundaries of Far Cry 4's game.xex, each with its evidence
+# (docs/fc4-notes.md, "Code generation").
+[functions]
+# First codegen (2026-11-09, 1,216 s): 18 "target not in any function" at 13 addresses. Each target follows a
+# terminator (bctr / blr / unconditional b) or padding, and is reached only by tail jumps (`b`) from thunks, so the
+# .pdata-driven scan never saw it as an entry (tools/ppc_dis.py on out/renut_image.bin):
+"0x82CD7BD8" = { }  # after a vcall bctr: li r11,1; stb r11,76(r3); blr (a flag setter). From thunk 0x82A75230
+"0x84015088" = { }  # lwz r3,0(r3); b 0x83A11260 (unwrap this, tail call). From thunk 0x83A64060
+"0x8359AB50" = { }  # after b 0x8359AAA0: a run of lfs/stfs copies from r4 to r3. From 0x8359AC60, 0x8359AC74
+"0x83A63D88" = { }  # lwz r11,3100(r3); cmplwi; addi r3,r11,1296 (null-safe member), b 0x84015058. From 0x83A7B500
+"0x83515110" = { }  # after a vcall bctr: lwz r11,40(r3); beqlr; vcall slot 4. From 0x835DDA40
+"0x82A02670" = { }  # one of a table of `lwz r3,136(r3); b <target>` forwarders. From 0x83589044
+"0x8359AAA0" = { }  # after b 0x8359A958: lfs/stfs copy, like 0x8359AB50. From 0x8359AB38, 0x8359AB4C
+"0x826077B8" = { }  # after b 0x826076C8: cmpwi r4,1..5 chain (a selector). From 0x82607870/78/90/98 (lfs f1 thunks)
+"0x829B9FD8" = { }  # lwz r3,64(r3); b 0x82A0E230 (forwarder). From 0x82676A04 (conditional tail call)
+"0x829BD490" = { }  # after b 0x829BD480: lwz r11,148(r3); null check; vcall-like load; blr. From 0x82A00D84
+"0x8249C860" = { }  # after b 0x8249C7F0: mr r10,r3; cmplw r3,r4; ... (r3/r4/r5 arguments). From 0x8249E3D4
+"0x829BA340" = { }  # lwz r3,4(r3); b 0x82A10B00 (forwarder). From 0x8260AF78
+"0x826F5A48" = { }  # lwz r3,16(r3); b 0x83422D70 (forwarder). From thunk 0x826CF5A8
