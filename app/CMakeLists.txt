@@ -162,6 +162,9 @@ endif()
 option(BANJO_RENUT_RENDERER "Build Renut's native renderer in (banjo_renderer = renut)" ON)
 if(BANJO_RENUT_RENDERER)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/banjo_renut_gpu.cmake")
+else()
+    # fc4-nx: the frame limiter's display anchor without Renut (src/fc4_display_sync_off.cpp)
+    target_sources(renut PRIVATE src/fc4_display_sync_off.cpp)
 endif()
 
 # The SDK compiles its own targets with these (sdk/CMakeLists.txt) but they did not reach the app's: without them GCC

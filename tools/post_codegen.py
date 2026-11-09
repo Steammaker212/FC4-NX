@@ -78,7 +78,7 @@ def main():
     if not os.path.isfile(IMAGE):
         sys.exit('post_codegen: out/renut_image.bin is missing (the image dump of the code generator): run the PC '
                  'build through tools\\pc_env.bat, which sets REXGLUE_DUMP_IMAGE, or set it for one codegen run')
-    xex = os.path.join(APP, 'assets', 'default.xex')
+    xex = os.path.join(APP, 'assets', 'game.xex')  # fc4-nx: the game module (default.xex is the installer)
     # banjo-nx (2026-10-29): and the title update's patch next to it (the image is the patched one).
     xexp = xex + 'p'
     if os.path.isfile(xexp) and os.path.getmtime(xexp) > os.path.getmtime(IMAGE):
@@ -116,7 +116,7 @@ def main():
     run(tool('pch_neon_shuffles.py'), pch)
     # --xex: loads of the XEX's import records (kernel variable addresses the loader writes) stay loads (from
     # peggle2-nx, 2026-10-15; found by futari-nx: 77 such loads were folded here).
-    xex = os.path.join(ROOT, 'app', 'assets', 'default.xex')
+    xex = os.path.join(ROOT, 'app', 'assets', 'game.xex')  # fc4-nx: game.xex
     run(tool('ro_constants.py'), '--gen', gen, '--image', IMAGE, *(['--xex', xex] if os.path.isfile(xex) else []))
     run(tool('float_loads.py'), '--gen', gen)
     run(tool('frame_traffic.py'), '--gen', gen)
@@ -223,7 +223,7 @@ def keep_unchanged_times(gen):
     kept = 0
     # The inputs of the generator's build step besides the manifest (codegen.d, and the generator itself).
     inputs = [os.path.join(os.path.dirname(gen), 'renut_config.toml'), os.path.join(os.path.dirname(gen), 'assets',
-              'default.xex'), os.path.join(os.path.dirname(gen), 'config', 'renut_funcs.toml'),
+              'game.xex'), os.path.join(os.path.dirname(gen), 'config', 'renut_funcs.toml'),
               os.path.join(os.path.dirname(gen), 'config', 'renut_hooks.toml'),
               os.path.join(os.environ.get('REXSDK_DIR', os.path.join(ROOT, 'sdk')), 'out', 'win-amd64', 'rexglue.exe')]
     floor = max([os.stat(p).st_mtime_ns for p in inputs if os.path.isfile(p)] or [0])

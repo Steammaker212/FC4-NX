@@ -109,6 +109,41 @@ Each run takes 20-24 minutes on this PC (i9-12900K), single-threaded in the anal
   after a terminator reached only by thunk tail jumps (`app/config/renut_funcs.toml`, each with its instructions).
 - **Run 2** (1,416 s, setjmp / longjmp set): **passed**. 947 files, 507 MB of C++ (Katamari: 269 files, ~220 MB). One
   warning: the unresolved `b 0x83F4EAC0` in SwitchToFiber, answered by the rexcrt fiber hooks (above).
-- Not run yet: `tools/pointer_fixpoint.py` and `tools/gap_sweep.py` (functions only reachable through data pointers or
-  computed addresses; Katamari needed 111 + 85) and `tools/switch_check.py` (jump tables). Each pass of the first two
-  is a scratch codegen plus a real one, so about 45 minutes a pass here.
+- Post-codegen passes (`tools/post_codegen.py`): **179,905 functions**; store cards on ~480,000 guest stores; 16,930
+  tiny leaves inlined across files. About 15 minutes.
+- `tools/pointer_fixpoint.py` / `tools/gap_sweep.py` (functions only reachable through data pointers or computed
+  addresses; Katamari needed 111 + 85) and `tools/switch_check.py` (jump tables): running (below). Each pass of the
+  first two is a scratch codegen plus a real one, so about 45 minutes a pass here. Pass 1 of the pointer sweep: 94,342
+  gaps, 600 candidates.
+
+### Base tools that named default.xex (fixed 2026-11-09)
+
+The base's tools assume the game is `default.xex`. For Far Cry 4 that is the installer, so:
+
+- `tools/post_codegen.py` gave `ro_constants.py` / `ro_constants_cfg.py` the installer's XEX for the import records
+  (loads of imported kernel variables must stay loads). The first PC build's generated tree was processed with the
+  wrong records; it is regenerated from scratch by the next codegen. Now `app/assets/game.xex`.
+- `tools/pointer_fixpoint.py`'s scratch manifest: now `game.xex`. Its first try ran the scratch codegen on the
+  installer with `REXGLUE_DUMP_IMAGE` set in the shell, which overwrote `out/renut_image.bin` with the installer's
+  2.2 MiB image: never export `REXGLUE_DUMP_IMAGE` around the sweeps (`tools/codegen.ps1` sets it for the real
+  codegen). Re-dumped from a scratch codegen stopped after the "written to" line (`out/imgdump`).
+- The SDK loads `game:\default.xex` unless the app says otherwise: `OnLoadXexImage` in `app/src/renut_app.h` now
+  returns `game:\game.xex`.
+
+## First PC boots (2026-11-09, SDK presenter + emulated Xenos, `tools/fc4_run_pc.ps1`)
+
+- **boot1-3:** nothing after D3D12 init: the app's path wizard (an ImGui dialog) waited for input with the paths
+  already on the command line. Without Renut the app now creates no dialogs (`renut_app.h`, OnCreateDialogs), as
+  katamari-nx does under the emulated renderer. Link fix: `src/fc4_display_sync_off.cpp` (the frame limiter's display
+  anchor lives in the Renut library).
+- **boot4:** game.xex loads; 180,229 recompiled functions registered; imports resolve (xam 141, xboxkrnl 190); the
+  game creates six job threads `Core_0..2 - Thread 0/1`, each `ConvertThreadToFiber` + `CreateFiber(0x83ADD348,
+  128 KB)` on host fibers (works). It then opens `game:\common.dat`, `game:\shadersobj.dat` and
+  `game:\generated\databases\generic\datapaths.ndb` and stops in `XamShowDirtyDiscErrorUI`: the installed archives
+  are expected in the game's root.
+- **The installed layout:** `tools/fc4_install_layout.py <game>` hard-links every file of `installation1/` to the same
+  path under the game folder (what the disc's installer does on the console, without copying 3.6 GB).
+- **boot5:** the archives open, no dirty-disc error; then `Call to invalid or unregistered function at guest address
+  0x82470838` (a function after a `b`, no stored pointer: the gap-sweep case). Expected probes that fail harmlessly:
+  `cmdline.ini`, `startup.dat`, `update:\patch.dat` (no title update), `sound_german/russian.dat`, `game:\Output\Xenon`
+  (a debug output folder on a read-only device).

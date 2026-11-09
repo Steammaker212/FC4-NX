@@ -142,7 +142,7 @@ def scratch_codegen(rexglue, d, candidates):
     open(os.path.join(d, 'overrides.toml'), 'w').write('[functions]\n' + body + '\n'.join(entries))
     game = os.path.realpath(os.path.join(APP, 'assets')).replace('\\', '/')
     man = ('[project]\nsdk_version = "0.10.0"\nname = "renut"\n\n[entrypoint]\n'
-           f'file_path = "{game}/default.xex"\nout_directory_path = "gen"\nincludes = ["overrides.toml"]\n')
+           f'file_path = "{game}/game.xex"\nout_directory_path = "gen"\nincludes = ["overrides.toml"]\n')
     open(os.path.join(d, 'renut_manifest.toml'), 'w').write(man)
     log = os.path.join(d, 'codegen.log')
     with open(log, 'w') as f:

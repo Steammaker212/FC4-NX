@@ -112,6 +112,10 @@ public:
         // Renut's overlay drawer creates; under the SDK's presenter (banjo_renderer = "emulated") they would draw into
         // no context at all. The emulated GPU is a reference image: no overlays.
         if (!banjo::renut_gpu::Active()) return;
+#else
+        // fc4-nx (2026-11-09): without Renut (the first boots, SDK presenter + emulated Xenos) the same holds, and the
+        // path wizard waited for input forever with the paths already given on the command line.
+        if (drawer) return;
 #endif
         //drawer->AddDialog(new FpsOverlayDialog(drawer));
         fps_dialog_ = std::make_unique<FpsOverlayDialog>(drawer);
@@ -137,6 +141,10 @@ public:
     // Native renderer: with masseffect_renderer_native = true the graphics system is the app's own
     // (src/me, from masseffect-nx) and the emulated Xenos GPU plugin is not loaded (ReXApp only loads it
     // when config.graphics is empty).
+    // fc4-nx (2026-11-09): the disc's default.xex is Far Cry 4's XUI installer (installer.exe); the game is game.xex
+    // (default.exe), the module the code was generated from (renut_manifest.toml).
+    void OnLoadXexImage(std::string& xex_image) override { xex_image = "game:\\game.xex"; }
+
     void OnPreSetup(rex::RuntimeConfig& config) override {
         banjo::ApplyMasterSwitches();
 #if REX_PLATFORM_SWITCH
