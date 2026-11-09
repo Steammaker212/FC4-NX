@@ -43,6 +43,16 @@ gc = {'__name__': 'gc'}
 exec(compile(open(os.path.join(TOOLS, 'gap_classify.py')).read(), 'gc', 'exec'), gc)
 
 
+def rexcrt_addresses():
+    """fc4-nx (2026-11-09): the functions the SDK replaces ([rexcrt] in app/config/renut_crt.toml, e.g. the XAPI fiber
+    functions) get no DEFINE_REX_FUNC(sub_...) in the generated tree, so find_gaps.py reports their bodies as gaps and
+    .pdata points at them. They are not missing functions: never candidates (pass 1 had accepted three of them)."""
+    path = os.path.join(APP, 'config', 'renut_crt.toml')
+    if not os.path.exists(path):
+        return set()
+    return {int(m.group(1), 16) for m in re.finditer(r'^\s*\w+\s*=\s*(0x[0-9A-Fa-f]+)', open(path).read(), re.M)}
+
+
 def find_rexglue():
     if os.environ.get('REXGLUE'):
         return os.environ['REXGLUE']
@@ -301,7 +311,7 @@ def main():
     lo, hi = code_range()
     CODE_LO, CODE_HI = lo, hi
     print(f'code range {lo:08X}-{hi:08X}, rexglue {rexglue}')
-    examined = set()
+    examined = rexcrt_addresses()  # fc4-nx: hooked by the SDK, not missing
     for n in range(1, 20):
         d = os.path.join(a.scratch, f'pass{n}')
         os.makedirs(d, exist_ok=True)

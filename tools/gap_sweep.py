@@ -83,7 +83,7 @@ def main():
     image = open(a.image, 'rb').read()
     lo, hi = pf.code_range()
     pf.CODE_LO, pf.CODE_HI = lo, hi
-    examined = set()
+    examined = pf.rexcrt_addresses()  # fc4-nx: hooked by the SDK, not missing
     for n in range(1, 10):
         d = os.path.join(a.scratch, f'pass{n}')
         os.makedirs(d, exist_ok=True)
