@@ -147,3 +147,16 @@ The base's tools assume the game is `default.xex`. For Far Cry 4 that is the ins
   0x82470838` (a function after a `b`, no stored pointer: the gap-sweep case). Expected probes that fail harmlessly:
   `cmdline.ini`, `startup.dat`, `update:\patch.dat` (no title update), `sound_german/russian.dat`, `game:\Output\Xenon`
   (a debug output folder on a read-only device).
+- **Function sweeps (2026-11-09):** `tools/pointer_fixpoint.py` 575 accepted (3 later removed: rexcrt-hooked fiber
+  functions), `tools/gap_sweep.py` 628 accepted; 1,200 declared in `app/overrides.toml`. boot6 then stopped on
+  `0x82468860`, which the pointer sweep had rejected ("tail branch into a function body": its `bne` lands on the next
+  registered function); declared with `end = 0x82468870` in `app/config/renut_funcs.toml`.
+- **boot7:** past XAM / XMP setup; XAudio's render driver registers and frames flow (SDL, 48 kHz); the controller is
+  found; `NetDll_XHttpStartup` / `XHttpOpen` are stubs. Paths come out as `(null)engine\shaders\...` and
+  `(null)engine\settings\overriderenderprofilerconfig.xml` (a root-path string is NULL: find who formats them) and
+  `engine\shaders\obj\index.vso/.pso/.rs` resolve to no device. Then three guest access violations: thread F80000B4 in
+  `sub_83AC94B8` (the fiber scheduler's range, 0x83ACxxxx), F800014C in `sub_83930888`, F8000094 in `sub_824FB800`
+  (symbolised with LLVM's llvm-symbolizer on renut.exe + renut.pdb). Next: read the three in IDA (`out/fc4_image.elf.i64`,
+  Hex-Rays works) and the path-root NULL.
+- A stale precompiled header after a codegen + post-codegen run ("renut_pch.h has been modified since the precompiled
+  header"): delete `app/out/pc/CMakeFiles/renut_recomp.dir/cmake_pch.hxx.pch` and build again.

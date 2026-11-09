@@ -17,3 +17,9 @@
 "0x8249C860" = { }  # after b 0x8249C7F0: mr r10,r3; cmplw r3,r4; ... (r3/r4/r5 arguments). From 0x8249E3D4
 "0x829BA340" = { }  # lwz r3,4(r3); b 0x82A10B00 (forwarder). From 0x8260AF78
 "0x826F5A48" = { }  # lwz r3,16(r3); b 0x83422D70 (forwarder). From thunk 0x826CF5A8
+# boot6 (2026-11-09): "Call to invalid or unregistered function at guest address 0x82468860". Pointed at from eight
+# tables in .rdata (0x82008B94, 0x82008D0C, 0x82008E7C ...); the pointer sweep rejected it ("tail branch into a function
+# body") because its 16 bytes end in `bne cr6,0x82468870`, the start of the registered sub_82468870 right after it:
+# `cmplw cr6,r4,r5; bne cr6,0x82468870; li r3,-4; blr`. Declared up to that start, the bne is a conditional tail call
+# with the same effect (r3-r5 and LR unchanged).
+"0x82468860" = { end = 0x82468870 }
