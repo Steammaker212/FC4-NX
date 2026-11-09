@@ -299,7 +299,9 @@ public:
         std::function<void(rex::PathConfig)> resume) override
     {
         StartRenutRenderer();
-        if (!path_wizard_) {
+        // fc4-nx (2026-11-09): the paths given on the command line (--game_data_root) start the game at once; the
+        // wizard waited for a click (the first Renut boot sat in the window loop with no game thread).
+        if (!path_wizard_ || !defaults.game_data_root.empty()) {
             // katamari-nx (2026-11-01): banjo_renderer = "emulated" creates no app dialogs (OnCreateDialogs), so no
             // wizard: the paths as given (the command line / the toml).
             renut::dlc::SetUserDataRoot(defaults.user_data_root);

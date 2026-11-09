@@ -319,3 +319,11 @@ resolved render targets back on the CPU (Renut's renderer must support resolve r
   and sa2-nx's FindGuestDeclarationLocked lookup in render/draw.cpp (sa2-nx draw.cpp ~4114). Also pending:
   sa2_renut_pacing.cpp uses banjo::display_sync::TakeHold (sa2-nx addition); device.cpp uses Video::SetGammaRamp and
   a 2-argument call (sa2-nx's video API).
+- **Renut builds and boots on PC (2026-11-09, renut7/8):** the game runs through Renut (D3D12): ~78 frames in the
+  first 13 s, resolves at 1280x704 / 960x544 (FC4's dynamic resolution), audio running, no crash in 280 s. Fixes on
+  the way: the path wizard waited for a click with the paths given (renut_app.h: skipped when --game_data_root is
+  set); Katamari's touch slots in d3d_native_state.cpp. Errors left: a few colour targets with garbage sizes
+  (11623x31137: likely a medium-confidence surface hook) and some pipeline creations failing.
+  PC window captures (tools/fc4_window_shot.ps1, PrintWindow) come out black: unclear whether that is the D3D12
+  flip-model swapchain or the image itself. Hang dumper: FC4_HANG_DUMP_S=N writes fc4_hang_dump.txt (all threads).
+  Run: tools/fc4_run_pc.ps1 -Build pc_renut -Visible -Extra "--banjo_renderer=renut".

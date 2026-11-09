@@ -2,9 +2,9 @@
 # (out/pc_runs/<Name>), muted, PNG captures every -Every seconds, stopped after -Seconds. Stops only the process it
 # started.
 #   powershell -File tools/fc4_run_pc.ps1 -Seconds 90 -Name boot1 [-Every 15] [-Extra "--gpu_plugin=xenos"] [-Visible]
-param([int]$Seconds = 90, [string]$Name = "run", [int]$Every = 15, [string]$Extra = "", [switch]$Visible)
+param([int]$Seconds = 90, [string]$Name = "run", [int]$Every = 15, [string]$Extra = "", [switch]$Visible, [string]$Build = "pc")
 $root = Split-Path -Parent $PSScriptRoot
-$dir = Join-Path $root "app\out\pc"
+$dir = Join-Path $root ("app\out\" + $Build)  # -Build pc_renut: the Renut renderer build
 $exe = Join-Path $dir "renut.exe"
 $game = (Resolve-Path (Join-Path $root "..\game")).Path -replace '\\', '/'
 $logs = Join-Path $root "out\pc_runs\$Name"

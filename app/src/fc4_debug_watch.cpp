@@ -144,6 +144,73 @@ void Start() {
 
 std::string HostBacktrace() { return Backtrace(2); }
 
+// fc4-nx (2026-11-09): hang dumper for hangs before logging/cvars exist (the first Renut boot stopped after the
+// renderer's init). With the environment variable FC4_HANG_DUMP_S=N, a thread started at process start waits N
+// seconds, then suspends every other thread in turn, unwinds its stack (RtlVirtualUnwind) and writes the frames to
+// fc4_hang_dump.txt in the working directory (renut.exe+offset: symbolise with llvm-symbolizer --obj=renut.exe
+// 0x140000000+offset).
+namespace {
+void DumpAllThreads(FILE* out) {
+  HMODULE m = GetModuleHandleW(nullptr);
+  const auto lo = reinterpret_cast<uintptr_t>(m);
+  const auto hi = lo + reinterpret_cast<IMAGE_NT_HEADERS*>(reinterpret_cast<uint8_t*>(m) +
+                                                           reinterpret_cast<IMAGE_DOS_HEADER*>(m)->e_lfanew)
+                           ->OptionalHeader.SizeOfImage;
+  const DWORD self = GetCurrentThreadId(), pid = GetCurrentProcessId();
+  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+  if (snap == INVALID_HANDLE_VALUE) return;
+  THREADENTRY32 te{};
+  te.dwSize = sizeof(te);
+  for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
+    if (te.th32OwnerProcessID != pid || te.th32ThreadID == self) continue;
+    HANDLE t = OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME | THREAD_QUERY_INFORMATION, FALSE, te.th32ThreadID);
+    if (!t) continue;
+    if (SuspendThread(t) != DWORD(-1)) {
+      CONTEXT c{};
+      c.ContextFlags = CONTEXT_FULL;
+      if (GetThreadContext(t, &c)) {
+        std::fprintf(out, "thread %lu:", te.th32ThreadID);
+        for (int i = 0; i < 40 && c.Rip; ++i) {
+          if (c.Rip >= lo && c.Rip < hi)
+            std::fprintf(out, " renut.exe+0x%llX", static_cast<unsigned long long>(c.Rip - lo));
+          else
+            std::fprintf(out, " 0x%llX", static_cast<unsigned long long>(c.Rip));
+          DWORD64 image = 0;
+          RUNTIME_FUNCTION* f = RtlLookupFunctionEntry(c.Rip, &image, nullptr);
+          if (!f) {  // a leaf: the return address is at the stack pointer
+            c.Rip = *reinterpret_cast<DWORD64*>(c.Rsp);
+            c.Rsp += 8;
+            continue;
+          }
+          void* handler_data = nullptr;
+          DWORD64 frame = 0;
+          RtlVirtualUnwind(UNW_FLAG_NHANDLER, image, c.Rip, f, &c, &handler_data, &frame, nullptr);
+        }
+        std::fprintf(out, "\n");
+      }
+      ResumeThread(t);
+    }
+    CloseHandle(t);
+  }
+  CloseHandle(snap);
+}
+
+struct HangDumper {
+  HangDumper() {
+    const char* env = std::getenv("FC4_HANG_DUMP_S");
+    const int seconds = env ? std::atoi(env) : 0;
+    if (seconds <= 0) return;
+    std::thread([seconds] {
+      std::this_thread::sleep_for(std::chrono::seconds(seconds));
+      if (FILE* out = std::fopen("fc4_hang_dump.txt", "w")) {
+        DumpAllThreads(out);
+        std::fclose(out);
+      }
+    }).detach();
+  }
+} g_hang_dumper;
+}  // namespace
+
 }  // namespace fc4::watch
 
 // The job system's lock-free free-list pop (docs/fc4-notes.md, boot7). Hooked only to report; always runs the original.
