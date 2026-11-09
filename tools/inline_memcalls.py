@@ -69,8 +69,8 @@ template <uint32_t N>
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--gen', required=True)
-    ap.add_argument('--memcpy', default='FFFFFFF0')
-    ap.add_argument('--memset', default='FFFFFFF4')
+    ap.add_argument('--memcpy', default='83FBF760')  # fc4-nx: FC4's CRT memcpy (docs/fc4-notes.md)
+    ap.add_argument('--memset', default='83FC34D0')  # fc4-nx: FC4's CRT memset
     ap.add_argument('--check', action='store_true')
     a = ap.parse_args()
     call = re.compile(r'^(\t+)((?:__imp__)?sub_(%s|%s)\(ctx, base\));$' % (a.memcpy.upper(), a.memset.upper()))

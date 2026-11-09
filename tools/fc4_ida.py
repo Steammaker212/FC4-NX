@@ -94,8 +94,28 @@ def cmd_func(args):
         print(f"0x{ea:08X}: " + (f"{fn_name(ea)} [0x{f.start_ea:08X}-0x{f.end_ea:08X}]" if f else "no function"))
 
 
+def cmd_funcs(args):
+    """funcs LO HI: every function starting in [LO, HI) with its size, caller count and IDA's no-return flag."""
+    import idautils, ida_funcs, ida_name
+    lo, hi = int(args[0], 16), int(args[1], 16)
+    for ea in idautils.Functions(lo, hi):
+        f = ida_funcs.get_func(ea)
+        n = len(set(idautils.CodeRefsTo(ea, 0)))
+        noret = " noreturn" if f.flags & ida_funcs.FUNC_NORET else ""
+        print(f"0x{ea:08X} size 0x{f.end_ea - ea:X} callers {n}{noret} {ida_name.get_name(ea)}")
+
+
+def cmd_noreturn(args):
+    """noreturn: every function IDA marks no-return, with its caller count."""
+    import idautils, ida_funcs
+    for ea in idautils.Functions():
+        f = ida_funcs.get_func(ea)
+        if f.flags & ida_funcs.FUNC_NORET:
+            print(f"0x{ea:08X} size 0x{f.end_ea - ea:X} callers {len(set(idautils.CodeRefsTo(ea, 0)))}")
+
+
 CMDS = {"decompile": cmd_decompile, "callers": cmd_callers, "xrefs": cmd_xrefs, "strings": cmd_strings,
-        "disasm": cmd_disasm, "func": cmd_func}
+        "disasm": cmd_disasm, "func": cmd_func, "funcs": cmd_funcs, "noreturn": cmd_noreturn}
 
 
 def main():

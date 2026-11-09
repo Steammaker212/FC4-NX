@@ -259,3 +259,21 @@ resolved render targets back on the CPU (Renut's renderer must support resolve r
 - Fix (sdk/src/system/xmemory.cpp, BaseHeap::AllocRange): high bound inclusive, not rounded; only pages ending at or
   below it count. boot18: no access violation in 150 s, textures loading, **title screen "PRESS A TO START"**
   (out/pc_runs/boot18/captura_009_0135s.png), XMA audio registers being written.
+
+## Intro runs on PC (2026-11-09, intro1-5)
+
+- Scripted input (`--input_script`) gets from the title through Campaign -> New Game -> START (OFFLINE) (needs DOWN:
+  START (ONLINE) does nothing offline): `10..65 every 5 s :A, 70:DOWN, 73..98 :A`. The intro cutscene plays (mountain
+  flyover, bus, Kyrat border, Pagan Min's helicopter) with faces lit correctly (out/pc_runs/intro5/sheet.png).
+- `--readback_resolve=fast` (Xenia's fix for black characters, compat #969): D3D12 TDR (DEVICE_HUNG) ~36 s in;
+  `--gpu_backend=vulkan`: NVIDIA's shader compiler (nvgpucomp64.dll) crashes creating a pipeline. Both are the PC-only
+  emulated GPU (xenos plugin, Xenia-derived); the Switch uses Renut's D3D-level renderer instead, where the black
+  characters need the same thing done natively: CPU readback of the resolve the game reads (character lighting).
+- Audio: no APU/XMA errors in the log; XMA decoding runs (~1250 frames / 10 s). Missing dialogue not confirmed or
+  ruled out in this build yet (needs a listen). The XAudio ducker getters are stubs that leave f1 unset, but the game
+  never calls them (no STUB warnings), so they are not the cause.
+- tools/fc4_ida.py: `funcs LO HI`, `noreturn`. CRT: memcpy = sub_83FBF760 (0x488 bytes, 2046 callers),
+  strncpy = sub_83FBF6F8, memset = sub_83FC34D0 (987 callers; inline_memcalls.py defaults now point at both).
+- Optimisation passes back ON (tools/fc4_set_gen_passes.bat ON) after the crash fix; the SDK change re-ran codegen +
+  post_codegen with the fixed tools: 1072 memcpy / 347 memset constant-size calls inlined. opt1: the scripted intro
+  runs 330 s with no access violation or GPU error (out/pc_runs/opt1/sheet.png).
