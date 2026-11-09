@@ -73,7 +73,7 @@ def hooked():
             if os.path.basename(path) == 'renut_config.toml':
                 # non_argument_as_local's keep list names functions that keep r11/r12 in ctx, not hooks
                 text = re.sub(r'non_argument_as_local_keep\s*=\s*\[.*?\]', ' ', text, flags=re.S)
-            for m in re.findall(r'(?<![0-9A-Fa-f])(82[0-9A-Fa-f]{6})(?![0-9A-Fa-f])', text):
+            for m in re.findall(r'(?<![0-9A-Fa-f])(8[2-9][0-9A-Fa-f]{6})(?![0-9A-Fa-f])', text):
                 names.add('sub_' + m.upper())
     return names
 

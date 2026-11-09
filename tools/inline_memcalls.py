@@ -69,8 +69,8 @@ template <uint32_t N>
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--gen', required=True)
-    ap.add_argument('--memcpy', default='82C111C0')
-    ap.add_argument('--memset', default='82C116F0')
+    ap.add_argument('--memcpy', default='FFFFFFF0')
+    ap.add_argument('--memset', default='FFFFFFF4')
     ap.add_argument('--check', action='store_true')
     a = ap.parse_args()
     call = re.compile(r'^(\t+)((?:__imp__)?sub_(%s|%s)\(ctx, base\));$' % (a.memcpy.upper(), a.memset.upper()))

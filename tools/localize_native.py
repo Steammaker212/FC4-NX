@@ -392,7 +392,7 @@ class Hooks:
                 continue
             text = strip_comments(text, toml)
             text = re.sub(r'__imp__\w+', ' ', text)
-            self.addresses.update(m.upper() for m in re.findall(r'(?<![0-9A-Fa-f])(82[0-9A-Fa-f]{6})(?![0-9A-Fa-f])', text))
+            self.addresses.update(m.upper() for m in re.findall(r'(?<![0-9A-Fa-f])(8[2-9][0-9A-Fa-f]{6})(?![0-9A-Fa-f])', text))
             if not toml:
                 self.words.update(re.findall(r'\b[A-Za-z_]\w{5,}\b', text))
         self.natives = set(natives)

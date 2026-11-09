@@ -33,7 +33,7 @@ import dead_ctx_defs as dcd  # noqa: E402
 
 DFORM = re.compile(r'^(-?\d+)\((r\d+)\)$')
 # no-return functions (tools/non_argument_audit.py's list in docs/codegen-enhancements.md)
-NORETURN = ['82BB59B0', '822B27A0', '822B8648', '82BAEAB8', '82BB1130', '82BB4AE0', '82BB4D00', '82BB9B78', '82BCDC10',
+NORETURN = [  # fc4-nx: Banjo's addresses removed
             'rex_longjmp', 'rex_exit', 'rex_j_std___Throw', 'rex_std___Throw', 'rex_abort', 'rex_amsg_exit',
             'rex_exit_1', 'rex_ExitThread']
 

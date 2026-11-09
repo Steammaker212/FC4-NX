@@ -206,3 +206,42 @@ The base's tools assume the game is `default.xex`. For Far Cry 4 that is the ins
   layout). Not yet ruled out.
 - Next: find who stores the garbage head into the free list (watch the list head object: a mid-asm hook or a guest
   store watch on that address), and whether Xenia Canary boots this disc (a shared-kernel vs recompiler question).
+
+## Base-tool audit for FC4's address range (2026-11-09)
+
+- direct_calls.py / llamadas_directas.py / localize_native.py only treated `82xxxxxx` addresses as hooked; now
+  `8[2-9]xxxxxx`. direct_calls --redo: 590 hooked addresses (was 572), 15 files changed; calls to sub_83AC94B8 now
+  reach the watch hook.
+- leaf_dead_stores.py ENTRY_POINT 0x826F46F0 (Banjo) -> 0x83F3F630. lr_preserve.py / r1_preserve.py: Banjo's
+  no-return addresses removed (TODO: FC4's own abort/exit/bugcheck from IDA). inline_memcalls.py defaults no longer
+  Banjo's memcpy/memset (TODO: FC4's CRT memcpy/memset; [rexcrt] can also take memcpy/memset/strings).
+- All of these are guarded by BANJO_GEN_* switches (currently OFF) except direct_calls, so they cannot explain boot7-10.
+- sub_83AC94B8 is a tagged (head+counter) ldarx/stdcx. pop: ABA-safe under CAS emulation. The garbage head most
+  likely comes from a write into a node already back on the free list (use-after-free) -> run the write watch.
+- app/config hot lists, renut_hooks.toml, choice JSONs: already empty. Katamari address hooks (me_ring_wait, FPS) sit
+  behind KATAMARI_BANJO_ADDRESS_HOOKS=0.
+
+## Boot crash narrowed: a texture copy overwrites live job objects (2026-11-09, boot11-15)
+
+- The pop's *list pointer* is the bad value, not the list head: sub_83AD5350 passes list = *(*(r3) + 0x20) to
+  sub_83ACFCF0 -> sub_83AC94B8. Bad case (boot14): r3 0x4001DE34 -> obj 0xF905C280, word at 0xF905C2A0 = 0x20611840.
+  The obj's words are DXT1 blocks (08200000 0B0B0B0C 18400820 2BAB2B2B ...): texture data on top of job objects
+  (the good ones sit at 0xF905BF00 / 0xF905C180 / 0xF905F980).
+- Hardware write watch (boot15, --fc4_watch_addr=F905C2A0 --fc4_watch_value=20611840): the writer is guest thread
+  0xF8000094 in sub_83FBF760 (CRT memcpy) <- sub_82476528 (128-byte chunk copy dest <- src, texture upload)
+  <- sub_827B7CF8 (DDS / D3D texture load: 83F1DFE0, 83F1ED98, 83F1BA30) <- sub_827B9DA0 <- sub_827D57F0 <- job
+  sub_83ADCA50. All simultaneous crashes follow from this one overwrite.
+- So two physical-memory users overlap: the texture's memory and the job pool. Next: who allocated each (the
+  texture's base address vs the job block containing 0xF905C280) - SDK physical allocator (XPhysicalAlloc /
+  MmAllocatePhysicalMemoryEx, 4 KB 0xE0000000 heap vs 64 KB 0xA0000000 view) or the game's own heap.
+- Watch-tool note: hooks must read guest memory through rex::memory::GuestPtr (0xE0000000+ has a 4 KB host offset
+  on Windows); `base + addr` read the wrong bytes there.
+
+## Xenia Canary reference run (user, 2026-11-09)
+
+Xenia Canary (D3D12, RTV/DSV path) runs FC4 to gameplay (bus intro, De Pleur's mansion, Bell Tower mission, menus,
+save/quit) without crashing. Issues seen there: characters' skin/clothes black (eyes, teeth, hair fine), black
+pistol/animals, screen-space blocky/checkerboard tiles, black terrain patches, much dialogue silent, reload not
+working. game-compatibility #969: `readback_resolve = true` fixes dark/black graphics. For this port: the game reads
+resolved render targets back on the CPU (Renut's renderer must support resolve readback); dialogue is likely XMA
+(check the APU path once in game). These are Xenia's bugs, not this port's; they are hints for the renderer phase.

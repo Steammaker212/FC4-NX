@@ -35,6 +35,9 @@
 namespace katamari::stage_diag {
 void Start();  // src/cpu/katamari_stage_diag.cpp
 }
+namespace fc4::watch {
+void Start();  // src/fc4_debug_watch.cpp (fc4_watch_addr / fc4_watch_pop, PC debug, off)
+}
 #include "native/nfsmw_nativo_captura.h"
 #if !REX_PLATFORM_SWITCH
 #include "profiler/nfsmw_perfil_pc.h"
@@ -225,6 +228,8 @@ public:
         banjo::LogEnhancements();
         // katamari-nx (2026-11-01): katamari_diag_game_state (off): the stage fields of the game state, as they change.
         katamari::stage_diag::Start();
+        // fc4-nx (2026-11-09): fc4_watch_addr / fc4_watch_pop (off): who writes a bad value (hardware breakpoint, PC).
+        fc4::watch::Start();
         // PC: function-level CPU profile (banjo_pc_profile_s = N seconds per report; 0 = off; from futari-nx).
         banjo::pc_profiler::Start();
         // Switch: per-thread CPU accounting, the optional sampler and the stall watchdog.

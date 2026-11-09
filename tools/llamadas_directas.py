@@ -41,7 +41,7 @@ def enganchadas():
                 texto = open(ruta, encoding='utf-8', errors='ignore').read()
             except OSError:
                 continue
-            for m in re.findall(r'(?<![0-9A-Fa-f])(82[0-9A-Fa-f]{6})(?![0-9A-Fa-f])', texto):
+            for m in re.findall(r'(?<![0-9A-Fa-f])(8[2-9][0-9A-Fa-f]{6})(?![0-9A-Fa-f])', texto):
                 nombres.add('sub_' + m.upper())
     return nombres
 
