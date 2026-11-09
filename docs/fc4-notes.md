@@ -160,3 +160,24 @@ The base's tools assume the game is `default.xex`. For Far Cry 4 that is the ins
   Hex-Rays works) and the path-root NULL.
 - A stale precompiled header after a codegen + post-codegen run ("renut_pch.h has been modified since the precompiled
   header"): delete `app/out/pc/CMakeFiles/renut_recomp.dir/cmake_pch.hxx.pch` and build again.
+
+## Reverse-engineering tools (2026-11-09)
+
+- IDA Pro 9.3 with the Hex-Rays PowerPC decompiler, headless through idalib: `tools/fc4_image_elf.py` wraps the image
+  as a PPC ELF (`out/fc4_image.elf`, analysed once into `out/fc4_image.elf.i64`: 158,734 functions, 263 s), and
+  `tools/fc4_ida.py decompile|callers|xrefs|strings|disasm|func` answers questions in about 6 s each.
+- REA 6.8.0 is registered for Claude Code (IDA provider), but its IDA adapter has no PowerPC lane and its Windows
+  Ghidra lane takes PE files only: `open_binary` refuses this image. `tools/fc4_ida.py` is the way in.
+
+## boot7's crashes, first reading
+
+- `sub_83AC94B8`: a lock-free pop on a {head, tag} doubleword (`ldarx` / `stdcx.` 64-bit), 21 callers, all in the fiber
+  job scheduler (0x83ACxxxx-0x83ADxxxx). The generated C++ is a faithful 64-bit CAS; the head word itself was bad
+  (0x20611840, unmapped).
+- `sub_824FB800`: a hash-map find (Park-Miller hash of `key ^ 0xDEADBEEF`, 157 callers); `sub_83930888`: a `std::map`
+  walk. Both read garbage (0x2D2DB5B1, 0x5EF8576B: hash-like values used as pointers).
+- Three threads (job threads Core_0/Core_1 - Thread 0 and an audio thread) failing at once on garbage points at one
+  memory corruption. Checked and ruled out: the fiber context layout (fiber data at +0, 0xA50 bytes, KTHREAD+0x164 all
+  match the game's XAPI); the SDK's SwitchToFiber saves and restores r1 and the non-volatiles. The XAPI fiber functions
+  are now hooked to host fibers with 256 KB host stacks.
+- A/B: `tools/fc4_set_gen_passes.bat OFF` builds with every optional post-codegen pass compiled out (boot8_safe).
