@@ -36,8 +36,6 @@
 #include "renut_engine/gpu/banjo_renut_select.h"
 #include "renut_engine/gpu/sa2_renut_pacing.h"  // sa2-nx
 #include "renut_engine/gpu/banjo_renut_capture.h"  // sa2-nx: lockstep captures
-#include "sa2_capture.h"                            // sa2-nx: lockstep captures
-#include "me/sa2_render_mode.h"                     // sa2-nx (1.0.3.1): the PC's docked test toggles
 
 #include <rex/cvar.h>
 #include <rex/kernel/xboxkrnl/video.h>
@@ -64,7 +62,7 @@
 using namespace renut::gpu;
 
 // sa2-nx: frames the game has presented (src/sa2_d3d_trace.cpp; the test recorder waits on it).
-extern std::atomic<uint64_t> g_sa2_game_frames;
+std::atomic<uint64_t> g_sa2_game_frames{0};  // fc4-nx: defined here (sa2-nx's app defines it)
 REXCVAR_DECLARE(bool, sa2_renut_gamma_ramp);  // sa2-nx (2026-10-20): backend/present.cpp
 // sa2-nx (2026-10-20, sa2_renut_core_layout): the SDK's core layout (system/xthread.cpp).
 extern "C" uint32_t RexSetGuestThreadCoreLayout(int main_core, uint32_t others_mask, int others_preferred);
@@ -895,9 +893,8 @@ void D3DDevice_Swap_hook(u32 device_va, u32 front_buffer, u32 /*parameters*/) {
   // sa2-nx: SA2's game frame count (src/sa2_d3d_trace.cpp: the flip, which only the GPU's vblank interrupt reaches).
   const uint64_t game_frame = g_sa2_game_frames.fetch_add(1, std::memory_order_relaxed) + 1;
   // sa2-nx (1.0.3.1): the PC's docked / handheld test toggles (sa2_render_test_toggle_at; nothing on the Switch).
-  sa2::render::OnPresented(game_frame);
+  (void)game_frame;  // fc4-nx: no sa2-nx render-mode toggles
   // sa2-nx: a lockstep recording (sa2_capture.cpp) takes this very frame: asked before it is queued.
-  const uint64_t capture_ticket = sa2::capture::RenutLockstepOn() ? RequestFrameCapture() : 0;
   renut::frame_stats::OnGameFrame();
   rex::latency::NoteGuestSwap();  // banjo-nx (2026-10-19, input latency): the probe
   const uint64_t swap_ordinal = rex::latency::SwapCount();
@@ -920,8 +917,7 @@ void D3DDevice_Swap_hook(u32 device_va, u32 front_buffer, u32 /*parameters*/) {
     // sa2-nx (2026-10-20): the display gamma ramp SA2's SetGammaRamp keeps in the device (sub_825527D8: +15408, 768
     // words; N&B's +0x3A9C), which the original Swap writes to the display controller's table, goes to the
     // scan-out (backend/present.cpp, sa2_renut_gamma_ramp).
-    if (REXCVAR_GET(sa2_renut_gamma_ramp))
-      Video::SetGammaRamp(device + kSa2DeviceOffsetGammaRamp);
+    // fc4-nx: no gamma ramp at scan-out yet (sa2-nx's Video::SetGammaRamp / present.cpp not ported)
     // banjo-nx (package 27c): the frame's last vertex and texture fills are read here, before the Swap's fence
     // completes. They were read at the present, after it: the game, told the frame was done, could rewrite a dynamic
     // buffer for the next frame first, and the frame's last draws (the composite, the HUD) took the new bytes.
@@ -954,11 +950,6 @@ void D3DDevice_Swap_hook(u32 device_va, u32 front_buffer, u32 /*parameters*/) {
     banjo::display_sync::NotePresented(swap_ordinal);  // banjo-nx (2026-10-19, latency batch 3)
   });
   RunReadyCallbacks();
-  if (capture_ticket) {
-    rex::ui::RawImage image;
-    const bool ok = WaitFrameCapture(capture_ticket, image, 2000);
-    sa2::capture::RenutLockstepFrame(game_frame, ok ? &image : nullptr);
-  }
 
   // sa2-nx: no ResetAllState (N&B's dirty masks; nothing reads them here: the draws read the device's state, and
   // SA2's own setters keep marking it).

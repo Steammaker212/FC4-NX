@@ -311,3 +311,11 @@ resolved render targets back on the CPU (Renut's renderer must support resolve r
   - hooks/shader.cpp: plume::RenderShader is held as unique_ptr in sa2-nx, raw pointer here (lines 213-244).
   - hooks/resource.cpp:1702 ReleaseGuestDeclarationLocked undeclared.
   - hooks/device.cpp includes renut_engine/gpu/sa2_renut_pacing.h (sa2-nx's pacing; copy or stub).
+- Merge decision (after trying sa2-nx's guest/resources.h: it drops katamari-nx's GroupSummary, PrefetchShader*,
+  draw_summary, HostShaderOf, stream_order/count that render/draw.cpp and guest/command_buffers.cpp use):
+  shader.cpp and guest/resources.h stay katamari-nx's; add sa2-nx's observe-only parts (its D3DResource_Destroy-only
+  resource model needs them): RegisterGuestDeclaration / FindGuestDeclarationLocked / ReleaseGuestDeclarationLocked,
+  its CreateVertexDeclaration RAW observe hook (katamari-nx's replacing hook off), XGRegisterVertex/PixelShader hooked,
+  and sa2-nx's FindGuestDeclarationLocked lookup in render/draw.cpp (sa2-nx draw.cpp ~4114). Also pending:
+  sa2_renut_pacing.cpp uses banjo::display_sync::TakeHold (sa2-nx addition); device.cpp uses Video::SetGammaRamp and
+  a 2-argument call (sa2-nx's video API).

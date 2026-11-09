@@ -251,6 +251,7 @@ function(renut_gpu_setup TARGET)
         ${RENUT_GPU_DIR}/backend/video.cpp
         # The guest D3D runtime, native, and its hooks.
         ${RENUT_GPU_DIR}/d3d/d3d_native_state.cpp
+        ${RENUT_GPU_DIR}/sa2_renut_pacing.cpp  # fc4-nx: sa2-nx's Swap pacing (the presentation interval)
         ${RENUT_GPU_DIR}/d3d/hooks/device.cpp
         ${RENUT_GPU_DIR}/d3d/hooks/draw.cpp
         ${RENUT_GPU_DIR}/d3d/hooks/resource.cpp

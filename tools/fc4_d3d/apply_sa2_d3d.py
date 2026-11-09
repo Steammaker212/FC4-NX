@@ -20,7 +20,7 @@ import shutil
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DST = os.path.join(ROOT, 'app', 'src', 'renut_engine', 'gpu', 'd3d')
-FILES = ['d3d.h', 'd3d_native.h', 'd3d_native_state.cpp', 'hooks/device.cpp', 'hooks/draw.cpp', 'hooks/resource.cpp',
+FILES = ['d3d.h', 'd3d_native_state.cpp', 'hooks/device.cpp', 'hooks/draw.cpp', 'hooks/resource.cpp',
          'hooks/shader.cpp', 'hooks/state.cpp', 'hooks/hooks_common.h']
 
 # SA2 -> FC4 for addresses that are not hook targets (docs/fc4-d3d-map.md "Guest data" and fc4-notes.md).
@@ -48,6 +48,53 @@ TEXT_FIXES = [
     ('if (GuestWord(kSkipExport512Pixels))', 'if (kSkipExport512Pixels && GuestWord(kSkipExport512Pixels))'),
     ('return LoadGuestU32(kFusionVa) != 0 ? 1 : 0;', 'return kFusionVa && LoadGuestU32(kFusionVa) != 0 ? 1 : 0;'),
 ]
+
+
+# ---- merges with katamari-nx's newer renderer (the rest of app/src/renut_engine/gpu is katamari-nx's) ----
+KAT = os.path.join(ROOT, '..', 'refs', 'katamari-nx', 'app', 'src', 'renut_engine', 'gpu')
+
+
+def merge_native_header(sa2_src):
+    """katamari-nx's d3d_native.h (touch tracking the command buffers use) with sa2-nx's private device offsets."""
+    const = re.compile(r'(\s*constexpr u32 (\w+)\s*=\s*)([0-9xA-Fa-f]+)(\s*;)')
+    sa2 = {}
+    for l in open(os.path.join(sa2_src, 'd3d_native.h'), encoding='utf-8'):
+        m = const.match(l)
+        if m:
+            sa2[m.group(2)] = m.group(3)
+    out = []
+    for l in open(os.path.join(KAT, 'd3d', 'd3d_native.h'), encoding='utf-8').read().split('\n'):
+        m = const.match(l)
+        if m and m.group(2) in sa2 and int(m.group(3), 0) != int(sa2[m.group(2)], 0):
+            l = m.group(1) + sa2[m.group(2)] + m.group(4) + l[m.end():] + '  // fc4-nx: SA2/FC4 layout (katamari-nx ' + m.group(3) + ')'
+        # the private render state: N&B 0x2E00-0x2EFF, katamari-nx 0x2DF4, SA2/FC4 +0x1A0 (the vertex declaration
+        # N&B 0x2E30 -> 12240); a wider range only marks more chunks dirty.
+        l = l.replace('TouchBits(0x2DF4, 0x108);', 'TouchBits(0x2F80, 0x140);  // fc4-nx: SA2/FC4 private render state')
+        out.append(l)
+    return '\n'.join(out)
+
+
+# guest/resources.h stays katamari-nx's (its draw / command-buffer code needs its records; docs/fc4-notes.md)
+SA2_EXTRA = ['sa2_renut_pacing.h', 'sa2_renut_pacing.cpp']
+FILE_FIXES = {
+    'hooks/device.cpp': [
+        ('#include "sa2_capture.h"                            // sa2-nx: lockstep captures\n', ''),
+        ('#include "me/sa2_render_mode.h"                     // sa2-nx (1.0.3.1): the PC\'s docked test toggles\n', ''),
+        ('extern std::atomic<uint64_t> g_sa2_game_frames;',
+         'std::atomic<uint64_t> g_sa2_game_frames{0};  // fc4-nx: defined here (sa2-nx\'s app defines it)'),
+        ('  sa2::render::OnPresented(game_frame);\n', '  (void)game_frame;  // fc4-nx: no sa2-nx render-mode toggles\n'),
+        ('  const uint64_t capture_ticket = sa2::capture::RenutLockstepOn() ? RequestFrameCapture() : 0;\n', ''),
+        ('  if (capture_ticket) {\n    rex::ui::RawImage image;\n    const bool ok = WaitFrameCapture(capture_ticket, image, 2000);\n'
+         '    sa2::capture::RenutLockstepFrame(game_frame, ok ? &image : nullptr);\n  }\n', ''),
+        ('    if (REXCVAR_GET(sa2_renut_gamma_ramp))\n      Video::SetGammaRamp(device + kSa2DeviceOffsetGammaRamp);\n',
+         "    // fc4-nx: no gamma ramp at scan-out yet (sa2-nx's Video::SetGammaRamp / present.cpp not ported)\n"),
+    ],
+    'sa2_renut_pacing.cpp': [
+        ('  bool hold = ::banjo::display_sync::TakeHold();',
+         "  bool hold = false;  // fc4-nx: katamari-nx's display_sync has no TakeHold (sa2_renut_queue_drain)"),
+        ('#include "cpu/sa2_enhancements.h"', '#include "renut_engine/gpu/fc4_sa2_shim.h"  // fc4-nx: sa2-nx\'s enhancement toggle'),
+    ],
+}
 
 
 def load_map():
@@ -115,6 +162,19 @@ def main():
         if not a.dry_run:
             dst = os.path.join(DST, rel)
             open(dst, 'w', encoding='utf-8', newline='\n').write('\n'.join(out))
+    if not a.dry_run:
+        open(os.path.join(DST, 'd3d_native.h'), 'w', encoding='utf-8', newline='\n').write(merge_native_header(src))
+        gpu_src = os.path.dirname(src)
+        for rel in SA2_EXTRA:
+            shutil.copyfile(os.path.join(gpu_src, rel.replace('../gpu/', '')), os.path.join(os.path.dirname(DST), rel.replace('../gpu/', '')))
+        for rel, fixes in FILE_FIXES.items():
+            path = os.path.join(DST if rel.startswith('hooks/') else os.path.dirname(DST), rel)
+            text = open(path, encoding='utf-8').read()
+            for old, new in fixes:
+                if old not in text:
+                    print('  FIX NOT APPLIED in', rel, ':', old.strip()[:70])
+                text = text.replace(old, new)
+            open(path, 'w', encoding='utf-8', newline='\n').write(text)
     print('apply_sa2_d3d: %(hooks)d hooks moved to FC4, %(disabled)d not linked, %(data)d data/helper addresses' % stats)
     for l in sorted(set(leftovers)):
         print('  left (check):', l)
