@@ -27,6 +27,7 @@ enum DeclUsage : u8 {
   BlendIndices = 2,
   Normal = 3,
   PSize = 4,
+  PointSize = 4,  // fc4-nx: XenosRecomp's name for PSIZE in RENUT_VERTEX_INPUT_LOCATIONS (shader_common.h)
   TexCoord = 5,
   Tangent = 6,
   Binormal = 7,

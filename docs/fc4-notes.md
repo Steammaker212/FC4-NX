@@ -288,3 +288,26 @@ resolved render targets back on the CPU (Renut's renderer must support resolve r
 - Configure now stops at app/out/renut_switch/shader_cache_switch.cpp: build the PC tree with RENUT=ON first, then
   tools/renut_switch_shader_cache.py. So the order is: Renut retargeted to FC4 (sa2-nx's d3d layer: d3d.h,
   d3d_native.h, hooks; FC4 addresses from out/fc4_d3d/hook_map.txt) -> PC Renut build + boot -> shader cache -> NRO.
+
+## Renut retarget, in progress (2026-11-09)
+
+- tools/fc4_d3d/apply_sa2_d3d.py copies sa2-nx's d3d layer (d3d.h, d3d_native.h, d3d_native_state.cpp, hooks/*)
+  and moves it to FC4: 204 hooks, 26 data/helper addresses (format table 0x82296708, full viewport 0x82296788,
+  XPhysicalAlloc no-large-pages flag 0x842DC280, XMemFree sub_8241E898; state tables, caps, HiZ, qword,
+  VdGlobalDevice from docs/fc4-d3d-map.md). DrawVerticesUP commented out (not linked); N&B's skip-export switches
+  and SA2's Fusion flag absent (guarded). gpu.cmake: hooks/state.cpp not built (sa2-nx's design).
+- Build: `set BUILD_DIR=...\app\out\pc_renut & set RENUT=ON & tools\fc4_build_pc.bat -- -k 0`.
+  - DXC binaries copied into app/thirdparty/reblue-XenosRecomp/thirdparty/dxc-bin/{bin,lib} (gitignored).
+  - Shader containers: app/cmake/banjo_renut_gpu.cmake -> out/fc4_shaders/containers (6,523; none in game.xex).
+  - FOG0/PSIZE0: shader_common.h rows X(PointSize,0,23) X(Fog,0,24) + `PointSize = 4` alias in
+    render/vertex_format.cpp. Shader cache now builds (6,523).
+  - BANJO_RENUT_EARLY_ALPHA=OFF in app/out/pc_renut for now (the failing run may have been the FOG0 error; recheck).
+- Remaining C++ errors (sa2-nx's d3d layer against katamari-nx's newer renderer):
+  - d3d_native.h: keep katamari-nx's (touch tracking: kTouch*, TouchBit, TagChunks, TakeTouches, g_tags_apart,
+    g_touch_compare, used by guest/command_buffers.cpp and banjo_renut_tuning.cpp) and put sa2-nx's private device
+    offsets in it (FenceCompletion 11024 ... AutoBackBuffer 15236, see sa2-nx's file); kStateTagChunks' private
+    render-state range (katamari 0x2DF4) must move to SA2's layout too. backend/queued.cpp static_assert
+    kDeltaReadChunks.count == 39 follows from it.
+  - hooks/shader.cpp: plume::RenderShader is held as unique_ptr in sa2-nx, raw pointer here (lines 213-244).
+  - hooks/resource.cpp:1702 ReleaseGuestDeclarationLocked undeclared.
+  - hooks/device.cpp includes renut_engine/gpu/sa2_renut_pacing.h (sa2-nx's pacing; copy or stub).

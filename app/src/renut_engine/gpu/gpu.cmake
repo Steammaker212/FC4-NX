@@ -255,7 +255,8 @@ function(renut_gpu_setup TARGET)
         ${RENUT_GPU_DIR}/d3d/hooks/draw.cpp
         ${RENUT_GPU_DIR}/d3d/hooks/resource.cpp
         ${RENUT_GPU_DIR}/d3d/hooks/shader.cpp
-        ${RENUT_GPU_DIR}/d3d/hooks/state.cpp
+        # fc4-nx (2026-11-09): sa2-nx's d3d layer (tools/fc4_d3d/apply_sa2_d3d.py): not d3d/hooks/state.cpp, as in
+        # sa2-nx (N&B's native state setters); FC4's own setters write the device the draws read.
         # Guest-side records, command buffers and callbacks.
         ${RENUT_GPU_DIR}/guest/callbacks.cpp
         ${RENUT_GPU_DIR}/guest/command_buffers.cpp

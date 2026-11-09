@@ -10,7 +10,9 @@
 # The shader containers its shader cache is built from: Renut's own dump of default.xex and the bundles
 # (tools/dump_shaders.py of a Renut checkout; banjo-nx's harvest has wrapped containers Renut's XenosRecomp does not
 # take). A normal variable, so it shadows gpu.cmake's cache entry.
-set(RENUT_SHADER_DUMP_DIR "${CMAKE_SOURCE_DIR}/../out/renut_shader_dump")
+# fc4-nx (2026-11-09): Far Cry 4 keeps no shaders in game.xex; all 6,523 containers come from shadersobj.fat, extracted
+# by tools/fc4_shaders/fc4_shader_containers.py as {vs,ps}_<xxh3>.bin (docs/fc4-shaders.md).
+set(RENUT_SHADER_DUMP_DIR "${CMAKE_SOURCE_DIR}/../out/fc4_shaders/containers")
 set(RENUT_ASSETS_DIR "${CMAKE_SOURCE_DIR}/assets" CACHE PATH "Game assets (default.xex and Bundle/)")
 
 # Renut's XenosRecomp is built as an ExternalProject (gpu.cmake): it gets this build's whole host toolchain, not only

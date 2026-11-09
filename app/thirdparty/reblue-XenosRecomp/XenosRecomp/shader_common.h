@@ -51,7 +51,10 @@
     X(TexCoord,  7, 19) \
     X(TexCoord,  8, 20) \
     X(TexCoord,  9, 21) \
-    X(TexCoord, 10, 22)
+    X(TexCoord, 10, 22) \
+    /* fc4-nx (2026-11-09): Far Cry 4's FOG0 / PSIZE0 vertex inputs (322 vertex shaders; docs/fc4-shaders.md) */ \
+    X(PointSize, 0, 23) \
+    X(Fog,       0, 24)
 
 // SPEC_CONSTANTS_ONLY keeps the HLSL below out of host C++ TUs, which IntelliSense would otherwise parse.
 #if (!defined(__cplusplus) || defined(__INTELLISENSE__)) && !defined(SHADER_COMMON_SPEC_CONSTANTS_ONLY)
