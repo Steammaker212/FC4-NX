@@ -112,7 +112,9 @@ if(PLUME_D3D12_AGILITY_SDK_ENABLED)
 endif()
 
 if(PLUME_PLATFORM_SWITCH)
-    if(NOT EXISTS "${PLUME_SWITCH_NVK_LIBRARY}")
+    # fc4-nx (2026-11-09): only a build that links NVK needs its library; the deko3d-only build (PLUME_SWITCH_NVK_LINK
+    # OFF) takes the Vulkan headers from PLUME_SWITCH_NVK_ROOT/include alone (tools/fc4_build_switch.bat).
+    if(PLUME_SWITCH_NVK_LINK AND NOT EXISTS "${PLUME_SWITCH_NVK_LIBRARY}")
         message(FATAL_ERROR "PLUME_SWITCH_NVK_LIBRARY does not exist: ${PLUME_SWITCH_NVK_LIBRARY}")
     endif()
     target_compile_definitions(plume PUBLIC

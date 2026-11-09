@@ -277,3 +277,14 @@ resolved render targets back on the CPU (Renut's renderer must support resolve r
 - Optimisation passes back ON (tools/fc4_set_gen_passes.bat ON) after the crash fix; the SDK change re-ran codegen +
   post_codegen with the fixed tools: 1072 memcpy / 347 memset constant-size calls inlined. opt1: the scripted intro
   runs 330 s with no access violation or GPU error (out/pc_runs/opt1/sheet.png).
+
+## Switch build bring-up (2026-11-09)
+
+- `tools/fc4_build_switch.bat` (tools/build_switch.bat with Python 3.15; NVK_SDK defaults to sdk/thirdparty/vulkan-headers:
+  no Mesa/NVK SDK on this PC, the build is deko3d only). `tools/fc4_deko3d_tools.bat` stages the host-shader tools:
+  SPIRV-Cross from out/fc4_shaders, uam = devkitPro's uam 1.1.0 (app/thirdparty/uam needs pthreads; its patches are
+  for the console-side library).
+- app/thirdparty/plume/CMakeLists.txt: the NVK library must exist only when PLUME_SWITCH_NVK_LINK is ON.
+- Configure now stops at app/out/renut_switch/shader_cache_switch.cpp: build the PC tree with RENUT=ON first, then
+  tools/renut_switch_shader_cache.py. So the order is: Renut retargeted to FC4 (sa2-nx's d3d layer: d3d.h,
+  d3d_native.h, hooks; FC4 addresses from out/fc4_d3d/hook_map.txt) -> PC Renut build + boot -> shader cache -> NRO.
