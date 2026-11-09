@@ -167,6 +167,20 @@ def main():
         gpu_src = os.path.dirname(src)
         for rel in SA2_EXTRA:
             shutil.copyfile(os.path.join(gpu_src, rel.replace('../gpu/', '')), os.path.join(os.path.dirname(DST), rel.replace('../gpu/', '')))
+        # hooks/shader.cpp: katamari-nx's (its records feed its draw / command-buffer code) with sa2-nx's observe-only
+        # hooks (tools/fc4_d3d/fc4_shader_observe.inc.txt) in place of its six hook lines.
+        kat = open(os.path.join(KAT, 'd3d', 'hooks', 'shader.cpp'), encoding='utf-8').read().split('\n')
+        kat = ['// fc4-nx: sa2-nx observe hooks below: ' + l if re.match(r'BANJO_RENUT_\w*HOOK\w*\(sub_', l) else l for l in kat]
+        block = open(os.path.join(ROOT, 'tools', 'fc4_d3d', 'fc4_shader_observe.inc.txt'), encoding='utf-8').read()
+        open(os.path.join(DST, 'hooks', 'shader.cpp'), 'w', encoding='utf-8', newline='\n').write(
+            '\n'.join(kat).rstrip('\n') + '\n\n' + block)
+        # d3d_native_state.cpp: sa2-nx's, plus katamari-nx's touch-slot functions (its d3d_native.h declares them).
+        kst = open(os.path.join(KAT, 'd3d', 'd3d_native_state.cpp'), encoding='utf-8').read()
+        touch = kst[kst.index('// banjo-nx (2026-10-26, banjo_renut_tags): the slots of d3d_native.h.'):kst.rindex('}  // namespace renut::gpu::native')]
+        path = os.path.join(DST, 'd3d_native_state.cpp')
+        st = open(path, encoding='utf-8').read()
+        end = st.rindex('}  // namespace renut::gpu::native')
+        open(path, 'w', encoding='utf-8', newline='\n').write(st[:end] + '// fc4-nx: katamari-nx' + chr(39) + 's touch slots' + '\n' + touch + st[end:])
         for rel, fixes in FILE_FIXES.items():
             path = os.path.join(DST if rel.startswith('hooks/') else os.path.dirname(DST), rel)
             text = open(path, encoding='utf-8').read()

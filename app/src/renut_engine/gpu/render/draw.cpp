@@ -8345,6 +8345,9 @@ int FastDrawLocked(const u8 *device_state, const DrawCall &call, const ReplayCon
     if (declaration_va) {
       if (declaration_va != g_last_declaration_va) {
         g_last_declaration = FindRecord<VertexDeclarationRecord>(declaration_va, RecordKind::VertexDeclaration);
+        // fc4-nx (sa2-nx): or one the game's own Direct3D created (hooks/shader.cpp).
+        if (!g_last_declaration)
+          g_last_declaration = const_cast<VertexDeclarationRecord *>(FindGuestDeclarationLocked(declaration_va));
         g_last_declaration_va = g_last_declaration ? declaration_va : 0;
       }
       declaration = g_last_declaration_va == declaration_va ? g_last_declaration : nullptr;
@@ -9657,6 +9660,9 @@ bool DrawStateLocked(const u8 *device_state, const DrawCall &call, const ReplayC
     if (declaration_va != g_last_declaration_va) {
       g_last_declaration =
           FindRecord<VertexDeclarationRecord>(declaration_va, RecordKind::VertexDeclaration);
+      // fc4-nx (sa2-nx): or one the game's own Direct3D created (hooks/shader.cpp).
+      if (!g_last_declaration)
+        g_last_declaration = const_cast<VertexDeclarationRecord *>(FindGuestDeclarationLocked(declaration_va));
       g_last_declaration_va = g_last_declaration ? declaration_va : 0;
     }
     declaration = g_last_declaration_va == declaration_va ? g_last_declaration : nullptr;

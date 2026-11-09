@@ -1,0 +1,172 @@
+# fc4-nx (2026-11-09): Far Cry 4's Direct3D functions (XDK 2.0.21256), read in out/renut_image.bin (read-only), for
+# Renut's hooks. One line per function: Renut's name (as the hook comments name it), FC4 address (- = not found / not
+# linked), SA2 address (sa2-nx's, - if sa2-nx never names it), confidence (high / medium / low), evidence.
+# tools/fc4_d3d/make_map.py merges this with the state tables into out/fc4_d3d/hook_map.txt.
+#
+# Method (docs/fc4-d3d-map.md): FC4 and SA2 (2.0.21076) link the same Direct3D objects; inside an object the functions
+# have SA2's exact sizes and order (unused ones dropped), so "shift" = FC4 - SA2 is constant over a run of functions
+# (tools/fc4_d3d/sa2_shift.py). Every shift below is backed by at least one function checked by its code.
+#
+# --- device object (shift 0x19C8CF8 .. 0x19C8EA0)
+D3DDevice_AddRef                     83F18450 -        high   lwarx/stwcx. increment of +0x3C (m_ReferenceCount), returns it; 10 ins
+D3D_CBlocker_Check                   83F180F8 8254F400 medium shift 0x19C8CF8 (as 8254F6A8 -> 83F183A0); BlockOnFence 83F2DA50 polls it with 83F18000 / 83F18030; reads fence word +11024, +11069, the hang-time global 0x84174F70, calls the dump 83F35F70
+D3D_CDevice_MiscFlush                83F183A0 8254F6A8 high   shift 0x19C8CF8; tests and clears flags 0x80/0x40 of +11072 then KickOff, as sa2-nx's note on sub_8254F6A8; Present calls it before KickOff
+D3DDevice_Release                    83F18478 -        high   3 game callers; decrements +0x3C, at 0 calls CDevice::Uninitialize 83F369E8 and frees the device (8241E898)
+D3DDevice_AcquireThreadOwnership     83F18500 -        high   stores GetCurrentThreadId (83F3FA78) at +11016 (creation thread id) when it is set; 5 game callers
+D3DDevice_ReleaseThreadOwnership     83F18540 -        high   sync; stw 0,+11016; 4 ins; 5 game callers
+D3DDevice_UnsetAll                   83F18680 -        medium unbinds everything: calls SetRenderTarget 83F22598, SetDepthStencilSurface 83F22928, SetVertexShader 83F23FE8, SetPixelShader 83F23DE0, SetVertexDeclaration 83F24200, SetIndices 83F21DE8, SetStreamSource 83F21CC8 ...; reads +12832, +15228, +15236; Katamari's UnsetAll sits at the same place (just before CreateDevice)
+Direct3D_CreateDevice                83F18AB0 8254FC10 high   li r3,0x6080 / li r4,0x80 then the allocator 83F188E8 (the only li 0x6080 in .text); type 2: ori 0x80 into +11068, 83F2D3A8, 83F36918; else BehaviorFlags +24392 (|0xC000000 as SA2), hardware path 83F36E40
+D3D_WindowScissorWriter              83F18B88 8254FCE8 medium shift 0x19C8EA0 (as CreateDevice); sa2-nx: "the window scissor back (Direct3D's shadow of it), as sub_8254FCE8 writes it"
+D3D_DeviceAllocate                   83F188E8 -        high   CreateDevice's allocator (83F18890 = XPhysicalAlloc wrapper, then memset)
+# --- swap object (shift 0x19C0FF0 / 0x19C0FE0)
+D3D_GraphicsInterruptCallback        83F18FB0 82557FC0 medium shift 0x19C0FF0 (as 825580F0 -> 83F190E0); KfAcquireSpinLock / KeSetEvent, the swap counters +16952..+16984: sa2-nx's "the flip" (the game frame counter)
+D3D_DisplayPresentSetup              83F190E0 825580F0 medium shift 0x19C0FF0; KeQueryPerformanceFrequency, +16960..+17112
+D3D_SynchronizeToPresentationInterval 83F199B8 825589D8 high  shift 0x19C0FE0: Sync -> Swap is 0x4C0 in both games; Present calls it (r4 = 0) after SetRenderTarget; sets the pending flag in +11069; reads +11028, +14000 (PresentationInterval), +24584
+D3DDevice_Swap                       83F19E78 82558E98 high   the only VdSwap caller (840B8390); also VdGetSystemCommandBuffer, VdPersistDisplay; writes SwapCount +16968, PresentFenceTag +15344, SwapFenceTag +11056, SwapFlags +11069 (SA2's offsets)
+D3DDevice_Present                    83F1A5E0 -        high   memcpy viewport +13024 (28 bytes), saves ScissorRect +13052..+13064, SetRenderTarget(0, AutoBackBuffer +15236), Sync 83F199B8, Resolve 83F2D358 into AutoFrontBuffer +15232, MiscFlush 83F183A0 + KickOff 83F2EE78 on flags +11072, SetViewport 83F224E8, SetScissorRect 83F21BD0, Swap(front +15232, &+14044)
+# --- clear object (shift 0x19B7EC0)
+D3D_ClearPackets                     83F1A6F8 82562838 medium shift 0x19B7EC0 (6 of 7 sa2-nx clear-chain addresses land on starts); calls KickOff, AllocateInlineData
+D3D_ClearChain2                      83F1A9B0 82562AF0 medium shift 0x19B7EC0
+D3D_ClearChain3                      83F1AC18 82562D58 medium shift 0x19B7EC0
+D3D_ClearChain4                      83F1B1B8 825632F8 medium shift 0x19B7EC0
+D3DDevice_ClearF                     83F1B838 82563978 high   shift 0x19B7EC0; ClearF -> Clear is 0x138 (78 ins) in both; Clear 83F1B970 calls it
+D3DDevice_Clear                      83F1B970 82563AB0 high   shift 0x19B7EC0; calls ClearF per rect (sa2-nx: "SA2's Clear (sub_82563AB0) calls ClearF once per rect")
+D3D_CopySampleModeFormats            83F1BA30 82563B70 medium shift 0x19B7EC0; 23 game + 5 internal callers
+# --- resources / textures
+D3D_IsResourceBound                  83F1BFD0 825498C8 high   loads exactly VertexDeclaration +12240, IndexBuffer +12812, RenderTargets +12816, DepthStencil +12832, PixelShader +13068, VertexShader +13072 (sa2-nx: reads every bound field but the strides)
+D3DResource_Destroy                  83F1C900 8254A200 high   shift 0x19D2700 (bound test 825498C8 -> 83F1BFD0 is 0x19D2708); waits on the resource fence through CDevice::BlockOnFence 83F2DA50 (8 calls), frees (8241E898), VdGlobalDevice record 0x82000A98/0x82000A9C, critical section 83F3C888; only caller is D3DResource_Release
+D3DResource_Release                  83F1CBA8 -        high   35 callers (25 game); calls D3DResource_Destroy 83F1C900 when the count reaches 0
+D3DDevice_CreateTexture              83F1EF48 -        medium InitializePresentationParameters 83F36BC0 calls it once (the automatic front buffer texture); 5 game callers; allocates and fills the header (83F1E830)
+D3DDevice_CreateSurface              83F1F068 -        medium InitializePresentationParameters calls it twice (back buffer, depth), as in N&B / Katamari; 6 game callers; HiZ (83F3C8D8 / 83F3C888)
+D3DDevice_SetTexture                 83F1F2A8 82549178 medium 16 game callers; fetch constant n via (n + 3230) * 4 = Textures +12920; reads +11036, +11040 (tags), +13928; InitializeApiState calls it; SA2's 82549178 is in another object order here
+D3DDevice_SetScissorRect             83F21BD0 -        high   Present restores the saved scissor with it; writes ScissorRect +13052..+13064, window scissor +10436/+10440
+D3DDevice_SetStreamSource            83F21CC8 82552408 high   stores the stride byte at StreamStrides +12904 and the stream at (s + 3209) * 4 = StreamSources +12836; UnsetAll calls it
+D3DDevice_SetIndices                 83F21DE8 -        high   the only function that stores IndexBuffer +12812
+D3DDevice_SetPWLGamma                83F21F00 -        medium shift 0x19CF810 puts SA2 at 825526F0 (sa2-nx never names it); writes the 768-word ramp at +15408 (addi 15408) like SetGammaRamp, 52 ins each; InitializePresentationParameters calls it before SetGammaRamp
+D3DDevice_SetGammaRamp               83F21FE8 825527D8 high   shift 0x19CF810 (7 sa2-nx addresses 825527D8..825533F0 land on starts); ramp at +15408 (sa2-nx's kSa2DeviceOffsetGammaRamp)
+D3D_SetViewport                      83F22200 825529F0 high   shift 0x19CF810; sa2-nx: "the viewport: floats at 0x32E0-0x32FB, the window offsets"; D3DDevice_SetViewport tail-calls it
+D3D_SetSurfaceState                  83F22458 82552C48 medium shift 0x19CF810 (0x3000, then the scissor); also render state 50's setter in the table
+D3D_SetDepthSurfaceState             83F22508 82552CF8 medium shift 0x19CF810; SetRenderTarget calls it
+D3DDevice_SetViewport                83F224E8 -        high   Present restores the saved 28-byte viewport with it; writes +13024..; tails to D3D_SetViewport 83F22200
+D3DDevice_SetRenderTarget            83F22598 82552D88 high   shift 0x19CF810; Present binds AutoBackBuffer +15236 with it (r4 = 0); reads RenderTargets +12816..+12828, DepthStencil +12832
+D3DDevice_SetDepthStencilSurface     83F22928 82553118 high   shift 0x19CF810; stores DepthStencil +12832; InitializePresentationParameters calls it after the depth surface
+D3D_SetRenderTargetRegisters         83F22C00 825533F0 medium shift 0x19CF810; stores RenderTargets +12816 and DepthStencil +12832 (401 ins)
+# --- shaders (shift 0x19C61B0 / 0x19C6230)
+D3DDevice_SetVertexShaderConstantF   83F23AE8 8255D8B8 medium shift 0x19C6230 with the next; 3 game callers each, 54 ins each (sa2-nx: the float constant uploads)
+D3DDevice_SetPixelShaderConstantF    83F23BC0 8255D990 medium as above
+D3DDevice_SetVertexShaderConstantB   83F23C98 -        medium bool constants at word 2528 (+0x2780 = m_Constants.VertexShaderB); Katamari's B setters are 0x60 apart, as these
+D3DDevice_SetPixelShaderConstantB    83F23CF8 -        medium as above
+XGRegisterPixelShader                83F23DA8 8255DBF8 high   shift 0x19C61B0 and SA2's size (14 ins, 0x38 to SetPixelShader); initialises the header (lis 0xFFFF0000, std zeros); the game's shader wrapper 827B3654 calls it after 83F245D0 copies the container to +0x28
+D3DDevice_SetPixelShader             83F23DE0 8255DC30 high   shift 0x19C61B0; stores PixelShader +13068
+D3DDevice_SetVertexShader            83F23FE8 8255DE38 high   shift 0x19C61B0; stores VertexShader +13072
+D3DDevice_SetVertexDeclaration       83F24200 -        high   stw r4,12240(r3) (VertexDeclaration +12240), sets a pending bit; 6 ins (Katamari's: 5 ins)
+D3DDevice_CreateVertexDeclaration    83F24308 8255E198 medium one game caller (827B1770); allocates (8241E718) and builds the declaration (83F24218: memset, +40 / +48); shift 0x19C6170
+XGSetPixelShaderHeader               83F245D0 -        medium zeroes the 40-byte header, copies the container to +0x28 (83F3EE28 = memcpy); game wrapper 827B3644
+XGSetVertexShaderHeader              83F24608 -        medium memset(shader, 0, 872) then copies the container to +0x368; game wrapper 827B35EC
+XGRegisterVertexShader               83F24648 8255E658 high   SA2's size (62 ins = 8255E750 - 8255E658); memset 872 (0x368: containers at +0x368); game wrapper 827B35FC calls it after 83F24608
+D3DDevice_GetDeviceCaps              83F24790 -        high   memcpy(out, 0x822969C0, 304): the D3DCAPS9 copy (N&B 0x82161B30, Katamari 0x820FC1F8)
+D3DDevice_CreateVertexShader         -        8255E750 high   not linked: FC4 builds shaders with XGSetVertexShaderHeader + XGRegisterVertexShader (83F24608 / 83F24648); the function at SA2's shift (83F24740) is something else
+D3DDevice_CreatePixelShader          -        8255E568 high   not linked: XGSetPixelShaderHeader + XGRegisterPixelShader (83F245D0 / 83F23DA8)
+# --- tiling, predication, draws (shift 0x19C2C48 / 0x19C2C00)
+D3DDevice_SetPredication             83F277C8 -        high   stores TilePredication +11060, RunPredication +11064, Predication +13084, +13088, PredicationSet +13092; 9 game callers
+D3DDevice_BeginTiling                83F27938 -        medium stores TilingSurfaces +13104..+13120, TileCount +13124, TilingExtent +13556..; one game caller
+D3DDevice_EndTiling                  83F27ED8 -        medium reads TileCount, the tiling surfaces, rects; resolves; one game caller
+D3DDevice_EndVertices                83F28390 -        medium lwz +13844 (VerticesRingEnd), stw +0x30 (Ring), blr: the inline end (no kick)
+D3DDevice_BeginVertices              83F283A0 82565758 high   stores VerticesRingEnd +13844 and the strides +12904 (sa2-nx: "SA2's BeginVertices stores it"); 303 ins (SA2 304 to DrawVerticesUP)
+D3DDevice_DrawVerticesUP             -        82565C18 high   not linked: SA2 has it between BeginVertices and DrawVertices (18 ins); in FC4 BeginVertices ends at 83F2885C and DrawVertices starts at 83F28860
+D3DDevice_DrawVertices               83F28860 82565C60 high   shift 0x19C2C00 = BeginVertices' minus DrawVerticesUP's 0x48; DrawVertices -> DrawIndexedVertices 0x418 in both; draw flush 83F33868 / 83F334D0 / 83F34600
+D3DDevice_DrawIndexedVertices        83F28C78 82566078 high   shift 0x19C2C00; reads IndexBuffer +12812
+D3DDevice_SetCommandBufferPredication 83F29170 -       medium SetPredication's stores plus CommandBuffer +13920
+D3DDevice_BeginCommandBuffer         83F29B28 -        medium stores CommandBuffer +13920..+13944, CommandBufferTagMask +11040, +15316..; 2 game callers
+D3DDevice_DrawIndexedTessellatedVertices 83F2A4B0 -    low    427 ins, the draw flush calls, +13748/+13752; RunCommandBuffer candidate 83F2B170 calls it
+D3DDevice_EndCommandBuffer           83F2AD50 -        low    stores CommandBuffer +13920 and +13940, the draw flush; 1 game caller
+D3DDevice_RunCommandBuffer           83F2B170 -        low    reads the buffer fields +13920.., +11040 tags; calls 83F2A4B0
+# --- resolve (shift 0x19C7C60)
+D3D_ClearColorForFormat              83F2BA50 82563DF0 medium shift 0x19C7C60 (as the resolve); 3 internal callers, the format tables
+D3D_ResolveCore                      83F2C200 825645A0 high   shift 0x19C7C60: core -> D3DDevice_Resolve is 0x1158 in both; 1109 ins
+D3DDevice_Resolve                    83F2D358 825656F8 high   shift 0x19C7C60; tail-calls the core; 16 game callers and Present (into AutoFrontBuffer)
+# --- ring and fences (shift 0x19E0368 below 8254D9A8, 0x19E02C0 from it)
+D3D_CDevice_SideBufferRing           83F2D3A8 8254D040 high   shift 0x19E0368; the type-2 path's ring on the side buffer (+17136), marked out of memory in +11069 (sa2-nx's sub_8254D040)
+D3D_CDevice_KickOffWptr              83F2D6A8 8254D340 medium shift 0x19E0368 (sa2-nx: "kick-off (CP_RB_WPTR)")
+D3D_CDevice_RingInterruptSetup       83F2D788 8254D420 medium shift 0x19E0368; KeAcquireSpinLockAtRaisedIrql
+D3D_RingBufferDeviceAllocate         83F2D820 8254D4B8 medium shift 0x19E0368; secondary ring fields +15308..+15340, InKickOff +13600
+D3D_CDevice_BlockOnFence             83F2DA50 8254D6E8 high   shift 0x19E0368; tests InKickOff +13600 (sa2-nx: "the word SA2's BlockOnFence tests"), the fence word +11024 / +11036, kicks, polls with the CBlocker functions 83F18000 / 83F180F8 / 83F18030
+D3DDevice_BlockOnFence               83F2DB20 -        high   VdGlobalDevice (KeGetCurrentProcessType, 0x82000A98/0x82000A9C) then CDevice::BlockOnFence; 4 callers
+D3D_CDevice_AllocateInlineData       83F2DC68 8254D9A8 high   shift 0x19E02C0; reads CommandBuffer +13920 (sa2-nx: "SA2's AllocateInlineData reads it")
+D3D_CDevice_NewSegment               83F2DD50 8254DA90 high   shift 0x19E02C0; Swap and BeginRingBig call it; +15320..+15344, +17136, +24392
+D3D_CDevice_KickOff2                 83F2DEC0 8254DC00 medium shift 0x19E02C0 (sa2-nx: "kick-off 2 (CP_RB_WPTR)")
+D3D_CDevice_KickOffSegment           83F2EAF0 8254E830 high   shift 0x19E02C0; KickOff calls it; InKickOff +13600, CommandBuffer +13920
+D3D_CDevice_KickOff                  83F2EE78 8254EBB8 high   shift 0x19E02C0; 139 internal callers; +11024 / +11036 fences, +11068 / +11069 flags, InKickOff +13600; Present kicks with it
+D3DDevice_IsFencePending             83F2EFB8 8254ECF8 high   shift 0x19E02C0; VdGlobalDevice, kicks when the fence is the current one (+11036), reads +11024; the game reaches it through the thunk 83F2F048 (5 callers)
+D3D_CDevice_BeginRingBig             83F2F0B8 8254EDF8 high   shift 0x19E02C0; KickOff then NewSegment 83F2DD50; Swap calls it
+D3DDevice_BlockUntilIdle             83F2F130 -        medium between BeginRingBig and InsertCallback as in Katamari (824E0518); KickOff, then CDevice::BlockOnFence on the current fence (+11036)
+D3DDevice_InsertCallback             83F2F1A8 8254EEE8 high   shift 0x19E02C0; 4 game callers; KickOff, 83F2E4E0
+D3DDevice_SetRingBufferParameters    83F2F200 8254EF40 high   shift 0x19E02C0; the only VdInitializeRingBuffer / VdEnableRingBufferRPtrWriteBack caller; called by the hardware path and Uninitialize
+# --- draw-time flush (shift 0x19DDBA0, all 11 sa2-nx addresses)
+D3D_DepthStateFlush                  83F32F48 825553A8 high   shift 0x19DDBA0 (11 of 11 land on starts)
+D3D_TilingFlush                      83F33140 825555A0 high   shift 0x19DDBA0
+D3D_FlushGroups                      83F334D0 82555930 high   shift 0x19DDBA0; every draw calls it
+D3D_FlushGroupRuns                   83F33590 825559F0 high   shift 0x19DDBA0
+D3D_FlushFetch                       83F33710 82555B70 high   shift 0x19DDBA0
+D3D_FlushConstants                   83F33868 82555CC8 high   shift 0x19DDBA0; every draw calls it first
+D3D_PatchVertexFetches               83F339B8 82555E18 high   shift 0x19DDBA0
+D3D_ShaderBinding                    83F34168 825565C8 high   shift 0x19DDBA0
+D3D_ShaderInlineCopy                 83F342B8 82556718 high   shift 0x19DDBA0
+D3D_ShaderLiterals                   83F34410 82556870 high   shift 0x19DDBA0
+D3D_ShaderPatched                    83F344C0 82556920 high   shift 0x19DDBA0
+D3D_ShaderLoad                       83F34600 82556A60 high   shift 0x19DDBA0; every draw calls it
+# --- device creation (shift 0x19DA0A0)
+D3D_InitializeApiState               83F361F0 8255C150 high   shift 0x19DA0A0 (5 init functions); 83F36918 and the hardware path call it after XenonGpu_Initialize; calls SetTexture, SetVertexDeclaration-side 83F24740, render state 100's setter
+D3D_CDevice_Uninitialize             83F369E8 -        high   VdShutdownEngines, VdSetGraphicsInterruptCallback(0), ExRegisterTitleTerminateNotification; D3DDevice_Release calls it
+D3D_DeviceBlockInit                  83F368A8 8255C808 high   shift 0x19DA0A0; global qword +11008, thread id +11016, process type +11020, side buffer +17136 (sa2-nx's sub_8255C808 fields)
+D3D_NoHardwareInit                   83F36918 8255C878 high   shift 0x19DA0A0; -1 into +21968, +21972, +15340 (sa2-nx's kDeviceOffsetsMinusOne); side-buffer ring, XenonGpu_Initialize, InitializeApiState
+D3D_InitializePresentationParameters 83F36BC0 8255CB20 high   shift 0x19DA0A0; VdQueryVideoMode, CreateTexture, CreateSurface x2, SetRenderTarget, SetDepthStencilSurface, SetPWLGamma, SetGammaRamp
+D3D_HardwareInit                     83F36E40 8255CDA0 high   shift 0x19DA0A0; CreateDevice's non-type-2 path: two RtlInitializeCriticalSection, VdInitializeEngines (83F36810), SetRingBufferParameters, the timer (83F41178), VdIsHSIOTrainingSucceeded, -1 words +21968/+21972, perf frequency +21996/+22000
+D3D_XenonGpu_Initialize              83F3CBC8 -        high   both init paths call it before InitializeApiState; fills the 26 texture fetch constants from +0x468 (stride 24) and -1 into +12248
+# --- not found in FC4 (see docs/fc4-d3d-map.md)
+D3D_CDevice_BeginRingManual          -        -        low    not identified (Katamari 8255A200, N&B 82A6DD88; sa2-nx does not hook it)
+D3DDevice_DrawIndexedVerticesUP      -        -        low    not identified (Katamari and sa2-nx leave it unhooked)
+D3DDevice_BeginExport                -        -        low    not identified (memexport; Renut leaves it unhooked on Katamari, sa2-nx does not hook it)
+D3DDevice_EndExport                  -        -        low    as BeginExport
+D3DDevice_GetDisplayMode             -        -        low    not identified (unhooked in Katamari's tree)
+D3DResource_GetDevice                -        -        low    not identified (unhooked in Katamari's tree)
+D3D_IsFusion                         -        -        low    not identified (unhooked in Katamari's tree)
+D3DVertexShader_Bind                 -        -        low    not identified (unhooked in Katamari's tree)
+# --- texture object (Katamari's order of these hooks; "K n" = Katamari's size in instructions from its adjacent hook
+#     addresses, FC4's size in brackets: equal sizes are the evidence)
+D3D_GetTextureDimensions             83F1D390 -        medium Katamari's texture object order; K 38 (38)
+D3DArrayTexture_UnlockRect           83F1D4C8 -        low    one of two 6-ins thunks to UnlockResource 83F1BAF0 (8 game callers); Katamari's order puts ArrayTexture_UnlockRect first
+D3DSurface_UnlockRect                83F1D4E0 -        low    the second 6-ins thunk to UnlockResource (3 game callers); Katamari's is 34 ins
+D3D_BlockSizeOfGpuFormat             83F1D4F8 -        medium K 38 (38); 12 callers
+D3D_GetMaxMipLevels                  83F1D590 -        medium K 34 (34)
+D3D_AlignTextureDimensions           83F1D618 -        medium K 72 (72); 13 callers
+D3D_FindTextureSize                  83F1D738 -        medium K 220 (224); calls AlignTextureDimensions, BlockSize
+D3D_GetMipTailLevelOffsetCoords      83F1DAB8 -        medium K 86 (86)
+D3D_GetLevelLayout                   83F1DC10 -        medium K 242 (244)
+D3D_Get2DSurfaceDesc                 83F1DFE0 -        medium K 64 (64); the GetDesc thunks tail to it
+D3D_Get3DSurfaceDesc                 83F1E0E0 -        medium K 64 (64)
+D3D_GetSubresourceLayout             83F1E1E0 -        medium K 304 (313)
+D3D_LockSurface                      83F1E6C8 -        medium K 50 (53); Lock2DSurface calls it
+D3D_Lock2DSurface                    83F1E7A0 -        medium K 36 (36); the LockRect thunks tail to it
+D3D_Lock3DSurface                    -        -        low    not linked (none between Lock2DSurface and 83F1E830)
+D3D_SetTextureHeader                 83F1E830 -        low    CreateTexture calls it; K 346 (189): the size does not agree
+D3DBaseTexture_GetLevelCount         83F1ED98 -        medium K 4 (4); 17 game callers
+D3DTexture_GetSurfaceLevel           83F1EDA8 -        medium K 46 (46); allocates a surface (8241E718), AddRef 83F1BD58
+D3DLineTexture_LockRect              83F1EE60 -        low    K 6 (8); tail to Lock2DSurface
+D3DCubeTexture_GetCubeMapSurface     83F1EE80 -        low    K 50 (45), the GetSurfaceLevel pattern; may instead be GetVolumeLevel (K 44)
+D3DVolumeTexture_GetVolumeLevel      -        -        low    not identified (83F1EE80 is the only GetSurfaceLevel-like function left)
+D3DSurface_GetDesc                   83F1F1A0 -        medium K 38 (38); 26 game callers; Get2DSurfaceDesc
+D3DSurface_LockRect                  83F1F238 -        medium K 8 (10); tail to Lock2DSurface
+D3DVolume_GetDesc                    83F1F260 -        medium K 18 (17); Get3DSurfaceDesc
+D3DVolume_LockBox                    -        -        low    not linked (none between Volume_GetDesc and SetTexture)
+# --- resource object
+D3D_UnlockResource                   83F1BAF0 -        medium the unlock thunks (83F1BF00, 83F1BFC0, 83F1D4C8, 83F1D4E0) tail to it; K 66 (83)
+D3DDevice_CreateVertexBuffer         83F1BE38 -        medium K 50 (50); allocates (8241E718 x2), frees on failure
+D3DVertexBuffer_Unlock               83F1BF00 -        medium K 4 (4); tail to UnlockResource
+D3DDevice_CreateIndexBuffer          83F1BF10 -        medium K 44 (43); same pattern as CreateVertexBuffer
+D3DIndexBuffer_Unlock                83F1BFC0 -        medium 4 ins, tail to UnlockResource
+D3DResource_AddRef                   83F1BD58 -        medium K 30 (29); GetSurfaceLevel / GetCubeMapSurface call it on the parent; 6 game callers
+D3DResource_GetDevice                83F1BDD0 -        medium VdGlobalDevice (KeGetCurrentProcessType, 0x82000A98/0x82000A9C), then D3DDevice_AddRef 83F18450 (Renut's hook does the same)
+D3D_LockResource                     83F1CF38 -        medium VertexBuffer_Lock / IndexBuffer_Lock call it; KeGetCurrentProcessType, CDevice::BlockOnFence; K 142 (220)
+D3DVertexBuffer_Lock                 83F1D2A8 -        medium K 20 (20); calls LockResource
+D3DIndexBuffer_Lock                  83F1D2F8 -        medium K 18 (18); calls LockResource

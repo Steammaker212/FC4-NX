@@ -126,6 +126,9 @@ void PrefetchShaderBehind(u32 shader_va);
 // Drops the host side of an in-place guest shader object, if it has one.
 // Requires State().mutex.
 void ReleaseGuestShaderLocked(u32 shader_va);
+// fc4-nx (sa2-nx): vertex declarations the game's own Direct3D created, kept per object (hooks/shader.cpp).
+const VertexDeclarationRecord *FindGuestDeclarationLocked(u32 declaration_va);
+void ReleaseGuestDeclarationLocked(u32 declaration_va);
 
 // Fills a declaration's host input layout and layout hash from its elements.
 void BuildDeclarationLayout(VertexDeclarationRecord &declaration);

@@ -1,0 +1,57 @@
+// fc4-nx (2026-11-09): sa2-nx's model (docs/fc4-notes.md, "Merge decision"). Far Cry 4's own Direct3D creates the shader
+// objects (no D3DDevice_CreateVertexShader / CreatePixelShader in FC4: XGSet*ShaderHeader + XGRegister*) and the vertex
+// declarations; the XGRegister functions and CreateVertexDeclaration run as the game's and are observed afterwards
+// (katamari-nx's replacing hooks above are not placed).
+namespace {
+std::unordered_map<u32, std::unique_ptr<VertexDeclarationRecord>> g_guest_declarations;
+
+// The host side of a declaration the game's Direct3D made from pElements (D3DVERTEXELEMENT9[], up to D3DDECL_END:
+// Stream 0xFF), in order with the draws (sa2-nx's).
+void RegisterGuestDeclaration(u32 declaration_va, const GuestVertexElement *elements) {
+  auto declaration = std::make_shared<VertexDeclarationRecord>();
+  declaration->x360.resource.Common = u32(d3d::ResourceType::VertexDeclaration);
+  declaration->self_va = declaration_va;
+  for (u32 i = 0; i < 64 && u32(elements[i].Stream) != 0xFF && u32(elements[i].Type) != kDeclTypeUnused; ++i)
+    declaration->elements.push_back(elements[i]);
+  BuildDeclarationLayout(*declaration);
+  render_thread::Queue([declaration_va, declaration] {
+    ForgetVertexDeclarationLocked(declaration_va);
+    g_guest_declarations[declaration_va] = std::make_unique<VertexDeclarationRecord>(*declaration);
+  });
+}
+}  // namespace
+
+namespace renut::gpu {
+const VertexDeclarationRecord *FindGuestDeclarationLocked(u32 declaration_va) {
+  auto it = g_guest_declarations.find(declaration_va);
+  return it != g_guest_declarations.end() ? it->second.get() : nullptr;
+}
+
+void ReleaseGuestDeclarationLocked(u32 declaration_va) {
+  if (g_guest_declarations.erase(declaration_va))
+    ForgetVertexDeclarationLocked(declaration_va);
+}
+}  // namespace renut::gpu
+
+// void XGRegisterVertexShader(D3DVertexShader*, void *pPhysicalPart)  (FC4 0x83F24648; SA2 sub_8255E658)
+BANJO_RENUT_HOOK_RAW(sub_83F24648) {
+  const u32 shader = ctx.r3.u32, physical = ctx.r4.u32;
+  __imp__sub_83F24648(ctx, base);
+  RegisterGuestShader(shader, physical, false);
+}
+
+// void XGRegisterPixelShader(D3DPixelShader*, void *pPhysicalPart)  (FC4 0x83F23DA8; SA2 sub_8255DBF8)
+BANJO_RENUT_HOOK_RAW(sub_83F23DA8) {
+  const u32 shader = ctx.r3.u32, physical = ctx.r4.u32;
+  __imp__sub_83F23DA8(ctx, base);
+  RegisterGuestShader(shader, physical, true);
+}
+
+// D3DVertexDeclaration *D3DDevice_CreateVertexDeclaration(const D3DVERTEXELEMENT9*)  (FC4 0x83F24308; SA2 sub_8255E198)
+BANJO_RENUT_HOOK_RAW(sub_83F24308) {
+  const u32 elements_va = ctx.r3.u32;
+  __imp__sub_83F24308(ctx, base);
+  const u32 declaration = ctx.r3.u32;
+  if (const auto *elements = declaration ? GuestPtr<const GuestVertexElement>(elements_va) : nullptr)
+    RegisterGuestDeclaration(declaration, elements);
+}
