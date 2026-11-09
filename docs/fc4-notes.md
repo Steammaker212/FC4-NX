@@ -181,3 +181,28 @@ The base's tools assume the game is `default.xex`. For Far Cry 4 that is the ins
   match the game's XAPI); the SDK's SwitchToFiber saves and restores r1 and the non-volatiles. The XAPI fiber functions
   are now hooked to host fibers with 256 KB host stacks.
 - A/B: `tools/fc4_set_gen_passes.bat OFF` builds with every optional post-codegen pass compiled out (boot8_safe).
+
+### boot8-10: narrowing the corruption (2026-11-09)
+
+- **Not the post-codegen passes:** boot8_safe (every optional pass compiled out, `tools/fc4_set_gen_passes.bat OFF`)
+  crashes identically: same threads, same addresses (0x20611840, 0x2D2DB5B1). The PC build is still configured OFF.
+- **Not the controller:** boot10 with `--input_backend=xinput` (no SDL controller events) crashes identically.
+- **Not jump tables:** `tools/fc4_switch_verify.py` checks every generated switch against its table in the image,
+  including the shapes `tools/switch_check.py` misses (FC4's compiler puts `rlwinm` between `lis` and `addi`, and
+  uses `lbzx`/`lhzx` offset tables with a separate base): 404 of 404 correct (counts and targets).
+- **Not the fiber save area:** the SDK saves r14-r31, f14-f31, v14-v31, v64-v127, cr2-cr4 and FPSCR, as XAPI does.
+- **The bad values were never allocated:** `--log_level=trace --log_noisy=true` traces every NtAllocateVirtualMemory
+  (1,450), NtFreeVirtualMemory (1,020), MmAllocatePhysicalMemoryEx (2,488); none covers 0x20611840 (virtual results
+  0x00100000-0x40800000, physical 0xB3xxxxxx-0xFBxxxxxx). The values do not occur in the image either: they are
+  computed or loaded garbage, deterministic from run to run.
+- Crash report with guest backtraces: `app/out/pc/logs/crash.txt` (the SDK writes it). Thread Core_0 - Thread 0 on its
+  thread fiber: sub_83F4F470 -> sub_83FC6CC0 -> sub_83FC6C40 -> sub_83ADCB28 (the job thread) -> sub_83ADC048 ->
+  sub_83ADD850 -> sub_83ADCA50 -> sub_83ADB4E8 -> sub_83ADA078 -> sub_83AD9F28 -> sub_83AD5350 -> sub_83ACFCF0 (a node
+  from a free list, else `NMalloc(8)`) -> sub_83AC94B8 (the pop).
+- The game's allocator: vtable {sub_8242FF98 alloc, sub_82429258 free, sub_82425FA0 realloc} at 0x84197920, installed
+  by sub_8242C900 into dword_84165890 ("NMalloc"); blocks of 256 bytes or less from a small-block allocator
+  (sub_8242FDF8), larger from sub_824257E0.
+- TLS: the XEX asks for 64 slots and 0x14 bytes of static TLS (0x842F1000); the SDK copies it per thread (Xenia's
+  layout). Not yet ruled out.
+- Next: find who stores the garbage head into the free list (watch the list head object: a mid-asm hook or a guest
+  store watch on that address), and whether Xenia Canary boots this disc (a shared-kernel vs recompiler question).
