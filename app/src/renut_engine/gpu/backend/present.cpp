@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include <plume_render_interface.h>
 
@@ -377,13 +378,38 @@ void ServeCaptureLocked(VideoState &s, const PresentImage *image) {
 
 // banjo_renut_diag_show_texture: the texture to show instead of the frame, when it has a 2D host texture and slot.
 bool DiagTextureImageLocked(PresentImage &out) {
-  static const u32 va = [] {
+  // fc4-nx (2026-11-10): a comma-separated list is shown in turn, 10 s each (one run, several textures).
+  // "R<n>": the previous frame's n-th resolve's destination (1-based, as numbered in the [trace] frame).
+  static const std::vector<u32> vas = [] {
+    std::vector<u32> out;
     const std::string v = REXCVAR_GET(banjo_renut_diag_show_texture);
-    return v.empty() ? 0u : u32(std::strtoul(v.c_str(), nullptr, 16));
+    for (size_t at = 0; at < v.size();) {
+      const size_t comma = std::min(v.find(',', at), v.size());
+      const std::string item = v.substr(at, comma - at);
+      if (!item.empty() && (item[0] == 'R' || item[0] == 'r'))
+        out.push_back(0x80000000u | u32(std::strtoul(item.c_str() + 1, nullptr, 10)));
+      else if (const u32 x = u32(std::strtoul(item.c_str(), nullptr, 16)))
+        out.push_back(x);
+      at = comma + 1;
+    }
+    return out;
   }();
-  if (!va)
+  if (vas.empty())
     return false;
-  HostTexture *t = FindHostTextureLocked(va);
+  static const auto start = std::chrono::steady_clock::now();
+  const auto s10 = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count() / 10;
+  const u32 entry = vas[size_t(s10) % vas.size()];
+  const bool by_index = (entry & 0xFFFF0000u) == 0x80000000u;
+  const u32 va = by_index ? LastFrameResolveDestLocked((entry & 0xFFFFu) - 1) : entry;
+  HostTexture *t = va ? FindHostTextureAnyLocked(va) : nullptr;
+  static int64_t logged_slot = -1;
+  if (s10 != logged_slot) {
+    logged_slot = s10;
+    RGPU_INFO("[diag] show texture {} ({:08X}): {}", by_index ? fmt::format("R{}", entry & 0xFFFF) : "", va,
+              t ? fmt::format("{}x{} host format {}, exp bias {}", t->width, t->height, u32(t->host_format),
+                              int(t->resolve_exp_bias))
+                : std::string("not found"));
+  }
   if (!t || !t->texture || t->slot == UINT32_MAX || t->slot == kInvalidDescriptor ||
       t->dimension != TextureDimension::Tex2D || t->stacked)
     return false;

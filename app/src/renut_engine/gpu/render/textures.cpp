@@ -1112,6 +1112,17 @@ HostTexture *FindHostTextureLocked(u32 texture_va) {
   return it != g_textures.end() ? it->second.get() : nullptr;
 }
 
+// fc4-nx (2026-11-10, diagnostics): also the resolve destinations held under their base page's key
+// (banjo_renut_resolve_any_size), by the header address they were last resolved for. A walk of every texture.
+HostTexture *FindHostTextureAnyLocked(u32 texture_va) {
+  if (HostTexture *t = FindHostTextureLocked(texture_va))
+    return t;
+  for (auto &[key, t] : g_textures)
+    if (t && t->guest_va == texture_va)
+      return t.get();
+  return nullptr;
+}
+
 // fc4-nx (2026-11-09): the last resolve destination into a base address (4 KB page). The page may be a CPU virtual one,
 // as in Far Cry 4's front buffer headers (D3D's Swap converts it; fb1: 0xF4DBF = physical 0x14DC0): the physical heaps'
 // views at 0xA0000000 / 0xC0000000 / 0xE0000000 (the last 4 KB higher) map back to their physical page.
@@ -1254,6 +1265,7 @@ TextureBinding BindTextureLocked(u32 texture_va, const TextureFetch &device_fetc
         binding.slot = handed;
     }
     binding.stacked = resolved->stacked;
+    binding.exp_bias = resolved->resolve_exp_bias;
     binding.scale = resolved->scale;
     binding.lod_scale = resolved->extra_levels ? resolved->scale : RenderScale{};
     return binding;
@@ -1402,6 +1414,7 @@ TextureBinding BindTextureLocked(u32 texture_va, const TextureFetch &device_fetc
       binding.slot = handed;
   }
   binding.stacked = t.stacked;
+  binding.exp_bias = t.resolve_exp_bias;
   binding.scale = t.scale;
   binding.lod_scale = t.extra_levels ? t.scale : RenderScale{};
   return binding;

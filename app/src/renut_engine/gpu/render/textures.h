@@ -44,6 +44,10 @@ struct HostTexture {
   // texture is 'scale' times the guest width and height, the render
   // resolution of the targets resolved into it (ResolutionScale).
   RenderScale scale;
+  // fc4-nx (2026-11-10): the exponent bias of the last resolve into it (D3DRESOLVE flags bits 26-31, RB_COPY_DEST_INFO
+  // copy_dest_exp_bias): the console stores the resolved values times 2^bias, Renut copies them as they are, so a bind
+  // adds it to the fetch's exponent adjust (BindingWords). Far Cry 4 resolves its HDR scene at 2^-5 and samples it at 2^5.
+  int8_t resolve_exp_bias = 0;
   uint32_t mip_levels = 1;
   // Host levels past the guest's one, for a scaled 2D color resolve
   // destination (UpdateResolveMipsLocked): its guest texel spans 'scale' host
@@ -164,6 +168,7 @@ struct TextureBinding {
   // The scale its host levels reach (HostTexture::extra_levels), 1x without
   // them; the sampler takes it (SamplerSlotLocked).
   RenderScale lod_scale;
+  int8_t exp_bias = 0;  // fc4-nx (2026-11-10): HostTexture::resolve_exp_bias
 };
 
 // Flags on a stacked texture's 3D descriptor index (RENUT_STACKED_TEXTURE,
@@ -291,6 +296,7 @@ HostTexture *GetDepthResolveTextureLocked(u32 texture_va, RenderScale scale,
 
 // Existing host texture for a guest texture VA, or nullptr.
 HostTexture *FindHostTextureLocked(u32 texture_va);
+HostTexture *FindHostTextureAnyLocked(u32 texture_va);  // fc4-nx (2026-11-10, diagnostics)
 // fc4-nx: the last resolve destination into this base page (virtual pages of the physical heaps mapped back).
 HostTexture *FindResolveTargetLocked(u32 base_page);
 

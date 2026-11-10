@@ -500,3 +500,24 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
 - **Audio in the recordings** (WinRT MediaTranscoder to WAV, no ffmpeg): the menu/title recordings have no
   discontinuities; the intro cutscenes and gameplay have 10-58 a second in clusters 16-48 samples apart, not on
   256-sample block edges (likely the scenes' own transients, not the mixer).
+
+## The dinner scene after the bus (2026-11-10, PC runs pchood2-7)
+- The bus ride and the Pagan Min scenes up to "Enjoy the Crab Rangoon" are a movie (34 draws a frame on PC; it plays
+  right on the console). A presses do not skip it. The in-engine dinner scene starts ~430 s into the scripted run
+  (~1,300 draws a frame); on PC its picture is black, on the console dark with green bloom.
+- **Resolve exponent bias:** FC4's D3D_ResolveCore (sub_83F2C200, recompiled) puts `(Flags >> 26) & 0x3F` into
+  RB_COPY_DEST_INFO bits 16-21 (copy_dest_exp_bias). FC4 resolves its HDR scene with EC000000 (2^-5) and the 64x64
+  16_16 targets and a 640x352 4x view with 2C000000 (2^11), and samples them with fetch exponent adjusts of the other
+  sign (PC: ~1,400 negative and ~600 positive adjusts per 10 s). Renut copies resolves as they are: now each resolve
+  destination keeps its bias (HostTexture::resolve_exp_bias) and a bind adds it to the fetch's adjust (BindingWords).
+- **EDRAM views of other formats:** the HDR scene (1280x704, 16_16_16_16_FLOAT) is also resolved through a
+  16_16_16_16 surface over the same EDRAM, which had a Renut target of its own that nothing drew (0 writes):
+  banjo_renut_view_float16 (surfaces.cpp) gives such a surface the float target once the view has been float.
+  Not done yet: a 640x352 4x-MSAA view of the same 1280x704 memory (the Xbox 360's free 2x2 downsample; resolve 35,
+  B3259834) still reads a target nothing drew.
+- The frame's end: the scene composite goes to a 1280x720 RGBA8 view, is resolved (rect 1280x704) into two textures,
+  depth/stencil cleared (clear flags 0x30), two quads drawn (the letterbox bars: no texture, opaque) and the view
+  resolved into the front buffer.
+- `banjo_renut_diag_show_texture` takes a list shown 10 s each, and "R<n>" = the previous frame's n-th resolve's
+  destination (logged as "[diag] show texture"); resolve destinations held by base page are found by a walk.
+- Launch PC runs from Bash: from PowerShell, `-Extra` reaches fc4_run_pc.ps1 cut at the first space.

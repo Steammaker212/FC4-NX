@@ -3149,7 +3149,9 @@ void BindingWords(const TextureBinding &binding, const TextureFetch &fetch, u32 
   index = binding.slot | binding.scale.code << kResolutionScaleShift;
   // fc4-nx (2026-11-10): the fetch constant's exponent adjust in bits 20-25 (shader_common.h renutExpScale: the fetch
   // result times 2^adjust). Far Cry 4 binds ~120 such textures a frame; Renut used to leave it out.
-  index |= (uint32_t(fetch.ExpAdjust()) & 0x3Fu) << kExpAdjustShift;
+  // With a resolve destination's own exponent bias (HostTexture::resolve_exp_bias), which Renut's copies leave out.
+  const int32_t exp_adjust = std::clamp(int32_t(fetch.ExpAdjust()) + binding.exp_bias, -32, 31);
+  index |= (uint32_t(exp_adjust) & 0x3Fu) << kExpAdjustShift;
   if (binding.stacked) {
     index |= kStackedTextureBit;
     if (fetch.VolumeMagFilter() != TextureFilter::Point ||
@@ -11229,8 +11231,19 @@ void DropReplacedRanges() {
   g_replaced_bytes += dropped;
 }
 
+namespace {
+std::vector<u32> g_frame_resolve_dests, g_last_frame_resolve_dests;  // fc4-nx (2026-11-10, diagnostics)
+}  // namespace
+u32 LastFrameResolveDestLocked(size_t index) {
+  return index < g_last_frame_resolve_dests.size() ? g_last_frame_resolve_dests[index] : 0;
+}
+
 void AdvanceStreamCacheFrameLocked() {
   banjo::renut_gpu::ResolveTraceFrameStart();
+  if (!g_frame_resolve_dests.empty()) {
+    g_last_frame_resolve_dests.swap(g_frame_resolve_dests);
+    g_frame_resolve_dests.clear();
+  }
   // banjo-nx (2026-10-19): banjo_renut_store_cards_verify's diagnostics, every 10 s.
   if (banjo::renut_gpu::StoreCardsVerifyOn()) {
     static auto last = std::chrono::steady_clock::now();
@@ -12000,6 +12013,8 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
   const u32 source_va = source == 4 ? device.U32(d3d::kDeviceOffsetDepthStencil)
                                     : device.U32(d3d::kDeviceOffsetRenderTargets + source * 4);
   HostSurface *surface = GetHostSurfaceLocked(source_va);
+  if (g_frame_resolve_dests.size() < 256)
+    g_frame_resolve_dests.push_back(dest_texture_va);
   if (banjo::renut_gpu::ResolveTraceOn() && surface) {
     const ClearRect r = source_rect ? *source_rect : ClearRect{0, 0, -1, -1};
     RGPU_INFO("[trace] resolve {} {:08X} ({}x{} fmt {} samples {}) -> texture {:08X} at ({},{}) level {} slice {}, "
@@ -12084,6 +12099,8 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
         banjo::renut_gpu::CountSkippedResolve(false);
       } else if (fits) {
         dest->resolve_signature = sig;
+        // fc4-nx (2026-11-10): the copy exponent bias (flags bits 26-31, signed), applied where it is sampled.
+        dest->resolve_exp_bias = int8_t(int32_t(flags) >> 26);
         g_bound.framebuffer = nullptr;
         // The destination is of the surface's scale.
         plume::RenderRect rect =

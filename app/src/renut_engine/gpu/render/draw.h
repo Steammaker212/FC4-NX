@@ -450,6 +450,9 @@ std::string ConvertReuseReport();  // banjo-nx (2026-10-26, banjo_renut_convert_
 // Once per guest Swap: ages the converted vertex stream cache and drops the
 // streams no draw has read for a while.
 void AdvanceStreamCacheFrameLocked();
+// fc4-nx (2026-11-10, banjo_renut_diag_show_texture "R<n>"): the destination header of the previous frame's n-th
+// resolve (0-based), or 0.
+u32 LastFrameResolveDestLocked(size_t index);
 
 // For the memory report: the converted vertex stream and index caches (the
 // pool's host memory and what the copies in it take).

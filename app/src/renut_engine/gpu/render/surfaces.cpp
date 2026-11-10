@@ -31,6 +31,12 @@
 #include <rex/ui/switch_saltynx.h>  // banjo-nx (2026-10-21): the console's mode, Reverse-NX obeyed
 #endif
 
+REXCVAR_DEFINE_BOOL(banjo_renut_view_float16, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-10): once an EDRAM colour view has been bound as 16_16_16_16_FLOAT, every surface "
+                    "over it in a 16_16_16_16 format takes the float target (the console's EDRAM is one memory; Far "
+                    "Cry 4 draws its HDR scene as float and resolves it through a 16_16_16_16 surface, which had a "
+                    "target of its own that nothing drew: a black picture). false: one target per format, as before");
+
 REXCVAR_DEFINE_STRING(renut_resolution, "720p", "Nuts&Bolts/Graphics",
                       "Internal render resolution, by its height: 480p, 720p (the game's own), "
                       "1080p, 1440p or 4K (2160 lines). Applies from the next frame.")
@@ -137,6 +143,9 @@ uint64_t g_next_generation = 1;
 // 2 D24FS8). The host format is part of a target's key, so a view used as both would get two targets where the console
 // has one memory: once a view has been bound as D24FS8, every surface over it takes the 32-bit float format.
 std::unordered_map<uint64_t, uint8_t> g_depth_view_formats;
+// fc4-nx (2026-11-10, banjo_renut_view_float16): the colour views (TargetKey without the format) bound as
+// R16G16B16A16_FLOAT.
+std::unordered_map<uint64_t, uint8_t> g_float16_views;
 // SetTilingExtentLocked; 0 x 0 when not tiling.
 uint32_t g_tiling_width = 0;
 uint32_t g_tiling_height = 0;
@@ -812,6 +821,21 @@ HostSurface *GetHostSurfaceSlow(u32 surface_va, const d3d::SurfaceDesc *desc) {
     seen |= bit;
     if (seen & 2)
       format = DepthTargetFormat();
+  }
+  if (!depth && REXCVAR_GET(banjo_renut_view_float16) &&
+      (format == plume::RenderFormat::R16G16B16A16_FLOAT || format == plume::RenderFormat::R16G16B16A16_UNORM ||
+       format == plume::RenderFormat::R16G16B16A16_SNORM)) {
+    // fc4-nx (2026-11-10): one view, one 64-bit format once it has been float (g_float16_views).
+    uint8_t &seen = g_float16_views[TargetKey(*desc, false, plume::RenderFormat::UNKNOWN, scale)];
+    if (format == plume::RenderFormat::R16G16B16A16_FLOAT) {
+      seen = 1;
+    } else if (seen) {
+      static uint32_t logged = 0;
+      if (logged++ < 8)
+        RGPU_INFO("Colour view of surface {:08X} (EDRAM base {}, a 16_16_16_16 format) takes its float target "
+                  "(banjo_renut_view_float16)", surface_va, u32(desc->ColorInfo) & 0xFFF);
+      format = plume::RenderFormat::R16G16B16A16_FLOAT;
+    }
   }
   const uint64_t key = TargetKey(*desc, depth, format, scale);
   auto [bound, first_use] = g_surface_keys.try_emplace(surface_va, key);
