@@ -37,7 +37,8 @@ if(NOT REXGLUE_SWITCH_NVK AND NOT TARGET rex::nvk)
     target_link_directories(rexglue_switch_nvk INTERFACE
         "${DEVKITPRO}/portlibs/switch/lib"
         "${DEVKITPRO}/libnx/lib")
-    target_link_libraries(rexglue_switch_nvk INTERFACE zstd z nx stdc++ m)
+    # No system zstd/zlib (devkitPro switch-zstd/switch-zlib are not installed here): Renut links its own renut_zstd.
+    target_link_libraries(rexglue_switch_nvk INTERFACE nx stdc++ m)
     target_link_options(rexglue_switch_nvk INTERFACE -pthread)
 endif()
 if(NOT TARGET rex::nvk)

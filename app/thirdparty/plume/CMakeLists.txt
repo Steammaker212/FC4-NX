@@ -173,7 +173,9 @@ if(PLUME_PLATFORM_SWITCH)
         "-Wl,--end-group"
     )
     else()
-        target_link_libraries(plume PUBLIC zstd z nx)
+        # fc4-nx: zstd/zlib were only for the NVK driver (plume itself uses neither; devkitPro's switch-zstd/zlib
+        # are not installed here).
+        target_link_libraries(plume PUBLIC nx)
     endif()
 
     # banjo-nx (2026-10-17): the deko3d back end (plume_deko3d*.cpp, banjo-nx docs/deko3d-renderer.md): devkitPro's

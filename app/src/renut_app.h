@@ -282,16 +282,27 @@ public:
         banjo::pgo::Stop();
     }
 
+    // The folder of the executable. fc4-nx (2026-11-09): Ryubing starts an NRO with no folder in argv[0]
+    // (GetExecutableFolder() empty: no game_root found, "--game_data_root was not provided", exit after 12 s), so
+    // on the Switch the install folder hbmenu gives, sdmc:/switch/fc4-nx.
+    static std::filesystem::path AppFolder() {
+        auto folder = rex::filesystem::GetExecutableFolder();
+#if REX_PLATFORM_SWITCH
+        if (folder.empty()) folder = "sdmc:/switch/fc4-nx";
+#endif
+        return folder;
+    }
+
     // A game_root folder next to the executable is used when no path was given.
-    // On the Switch that is sdmc:/switch/katamari-nx/game_root (the extracted disc).
+    // On the Switch that is sdmc:/switch/fc4-nx/game_root (the extracted disc).
     void OnConfigurePaths(rex::PathConfig& paths) override {
 #if defined(KATAMARI_BUILTIN_CONFIG)
         // The player's settings file. Not renut.toml: the test builds' full one, left on an SD card, would override
         // every built-in setting.
-        paths.config_path = rex::filesystem::GetExecutableFolder() / "katamari.toml";
+        paths.config_path = AppFolder() / "katamari.toml";
 #endif
         if (paths.game_data_root.empty()) {
-            const auto folder = rex::filesystem::GetExecutableFolder();
+            const auto folder = AppFolder();
             std::error_code ec;
             const auto extracted = folder / "game_root";
             if (!folder.empty() && std::filesystem::is_directory(extracted, ec)) {

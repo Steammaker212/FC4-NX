@@ -377,3 +377,19 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   Campaign menu's 3D elephant scene render correctly at 30 fps, no crash in 300 s.
 - Menu script for this build: title A presses 10..35 s, Campaign shows NEW GAME / UPLAY by ~42 s (UPLAY and START
   (ONLINE) give "requires Xbox Live"); then NEW GAME, DOWN, START (OFFLINE).
+
+## First Switch NRO in stock Ryubing (2026-11-09)
+
+- Build: `generated/renut_register.cpp` (one function, ~181k `SetFunction` calls) sat 1h40m in GCC at `-O3 -g`; it is
+  now `-O1 -g0 -fno-var-tracking` (app/CMakeLists.txt) and compiles in seconds. The link wanted `-lzstd -lz` from
+  devkitPro portlibs, which are not installed here: plume's and rexglue_switch_nvk's no-NVK branches linked them for
+  the NVK driver only; Renut links its own `renut_zstd`. NRO 134 MB.
+- `tools/fc4_run_ryujinx.ps1`: the game_root junction needs `$env:ComSpec` (Git Bash's `cmd` is msys2's script).
+- Ryubing starts a command-line NRO with no folder in argv[0]: `GetExecutableFolder()` is empty, so no game_root and
+  no katamari.toml ("--game_data_root was not provided", exit at 12 s; the SaltyNX profiler thread then faults in
+  `fprintf(stderr)` on the closed stream at 35 s). `RenutApp::AppFolder()` falls back to `sdmc:/switch/fc4-nx`.
+  Toml cvars load after the paths, so `game_data_root` in katamari.toml cannot fix it.
+- Then: `AllocFixed: could not commit ... Failure 0xE401` (InvalidHandle). Without hbloader there is no process
+  handle; guest_memory_switch.cpp uses `CUR_PROCESS_HANDLE` for `svcMapProcessCodeMemory`, which stock Ryubing
+  (canary, reports 1.3.352) rejects. katamari-nx was tested on "the user's patched Ryubing" (another PC); only the
+  stock build is on this one. On a console hbloader passes the real handle.

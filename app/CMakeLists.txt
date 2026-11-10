@@ -197,6 +197,12 @@ if(BANJO_GENERATED_MATH_FLAGS AND TARGET renut_recomp AND CMAKE_CXX_COMPILER_ID 
         target_compile_options(renut_recomp PRIVATE -fno-trapping-math)
     endif()
 endif()
+# generated/renut_register.cpp is one function of ~181k SetFunction calls, run once at boot. GCC at -O3 -g spent over
+# 1h40m on it (var-tracking on one huge function); -O1 -g0 compiles it in reasonable time at no runtime cost.
+if(TARGET renut_recomp AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/generated/renut_register.cpp" TARGET_DIRECTORY renut_recomp
+        APPEND PROPERTY COMPILE_OPTIONS -O1 -g0 -fno-var-tracking)
+endif()
 
 # The localized native copies (src/cpu/banjo_hot_guest.cpp includes generated/hot) are game code compiled in the app:
 # the same rules as renut_recomp for that one file (sa2-nx's findings). -fno-math-errno: GCC does not inline between
