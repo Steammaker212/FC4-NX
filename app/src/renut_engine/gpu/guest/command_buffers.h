@@ -21,6 +21,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <rex/types.h>
 
@@ -69,6 +70,10 @@ void FlushRecordedVertices(u32 device_va);
 void QueueRunCommandBuffer(u32 device_va, u32 command_buffer_va);
 
 void ReleaseCommandBuffer(u32 command_buffer_va);
+// fc4-nx (2026-11-09): D3DDevice_InsertAsyncCommandBufferCall on the title device: the render thread replays, at this
+// place, the buffers the call's D3DAsyncCommandBufferCall_FixupAndSignal names (either may come first).
+void QueueAsyncCommandBufferCall(u32 device_va, u32 async_call_va);
+void SignalAsyncCommandBufferCall(u32 async_call_va, const std::vector<u32> &command_buffers);
 
 // banjo-nx (2026-10-28, the heap): the spare buffers given back while the heap's room is below 256 MB (checked every
 // 5 s; the frame's hook calls it).

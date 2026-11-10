@@ -22,6 +22,17 @@
 #include <rex/runtime.h>
 #include <rex/system/function_dispatcher.h>
 #include <rex/system/thread_state.h>
+#include <string>
+#include <fmt/format.h>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace rex::runtime {
 
@@ -35,9 +46,18 @@ FunctionDispatcher* GetBoundFunctionDispatcher() {
 }  // namespace
 
 static void InvalidFunctionTrap(PPCContext& ctx, uint8_t* /*base*/) {
-  // fc4-nx (2026-11-09): the caller (lr = the instruction after its bctrl) and the first argument.
-  REX_FATAL("Call to invalid or unregistered function at guest address 0x{:08X} (lr 0x{:08X}, r3 0x{:08X})",
-            ctx.last_indirect_target, static_cast<uint32_t>(ctx.lr), ctx.r3.u32);
+  // fc4-nx (2026-11-09): the caller (lr = the instruction after its bctrl), the first argument and, on Windows, the
+  // host stack (exe+offset: llvm-symbolizer --obj=<exe> 0x140000000+offset).
+  std::string stack;
+#if defined(_WIN32)
+  void* frames[24];
+  const unsigned short n = RtlCaptureStackBackTrace(0, 24, frames, nullptr);
+  const auto module = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  for (unsigned short i = 0; i < n; ++i)
+    stack += fmt::format(" +0x{:X}", reinterpret_cast<uintptr_t>(frames[i]) - module);
+#endif
+  REX_FATAL("Call to invalid or unregistered function at guest address 0x{:08X} (lr 0x{:08X}, r3 0x{:08X}); host:{}",
+            ctx.last_indirect_target, static_cast<uint32_t>(ctx.lr), ctx.r3.u32, stack);
 }
 
 PPCFunc* ResolveIndirectFunction(uint32_t guest_address) {

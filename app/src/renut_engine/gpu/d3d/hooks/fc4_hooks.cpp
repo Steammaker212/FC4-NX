@@ -8,6 +8,7 @@
 // callbacks, which Renut runs on a game thread at its next D3D call (guest/callbacks.h) - and the spinning thread makes
 // none. The hook waits here instead, running the callbacks the render thread has reached, then calls the original.
 #include <chrono>
+#include <vector>
 #include <thread>
 
 #include <rex/hook.h>
@@ -16,6 +17,7 @@
 #include "renut_engine/gpu/banjo_renut_select.h"
 #include "renut_engine/gpu/backend/render_thread.h"
 #include "renut_engine/gpu/guest/callbacks.h"
+#include "renut_engine/gpu/guest/command_buffers.h"
 #include "renut_engine/gpu/guest/guest_memory.h"
 #include "renut_engine/gpu/log.h"
 
@@ -95,3 +97,105 @@ BANJO_RENUT_HOOK_RAW(sub_838B8998) {
 }
 BANJO_RENUT_HOOK_RAW(sub_838B8598) { AsyncNote(2, "unlock body", ctx.r3.u32, 0); __imp__sub_838B8598(ctx, base); }
 BANJO_RENUT_HOOK_RAW(sub_83F18790) { AsyncNote(3, "slot free", ctx.r3.u32, ctx.r4.u32); __imp__sub_83F18790(ctx, base); }
+
+// fc4-nx (2026-11-09, debug, fc4_renut_cb_trace): command buffer creation and Begin, with their callers.
+REXCVAR_DEFINE_BOOL(fc4_renut_cb_trace, false, "FC4/Renut", "Debug: log command buffer creation and Begin");
+BANJO_RENUT_HOOK_RAW(sub_83F290F0) {
+  const u32 lr = u32(ctx.lr), size = ctx.r8.u32, context = ctx.r7.u32;
+  __imp__sub_83F290F0(ctx, base);
+  if (REXCVAR_GET(fc4_renut_cb_trace))
+    RGPU_INFO("[fc4 cb] create -> {:08X} (size {:X}, context {:08X}, lr {:08X})", ctx.r3.u32, size, context, lr);
+}
+// D3DDevice_BeginCommandBuffer 83F29B28 (device, buffer, flags, ...): FC4's original sets device +13920 (the buffer being
+// recorded, Renut's IsRecordingCommandBuffer) and the ring; Renut's recording of that buffer starts over after it
+// (command_buffers.h BeginRecording). EndCommandBuffer (83F2AD50) needs nothing: its original clears +13920.
+//
+// The game's command buffer memory callback (sub_827BAAB0, given at creation, 83F290F0) goes to its allocator
+// (sub_827BA8E8), which first drains the GPU-done queue at 0x84239250 (sub_827BA778: pop sub_82476A68, then
+// sub_827B8570, which puts the buffer's holder back on its free list 0x8423A3C8). D3D calls that callback when a
+// recording runs out of ring; Renut rewinds the ring instead (KickOff / KickOffSegment hooks), so nothing drained the
+// queue and the 256 holders ran out (acb1: Begin with a null buffer -> FATAL at 83F29AB0). Drained here, at each Begin.
+namespace {
+constexpr u32 kGpuDoneQueue = 0x84239250;
+}  // namespace
+REX_EXTERN(__imp__sub_82476A68);  // lock-free pop: r3 = queue, r4 = where the item goes; returns r3 != 0 when popped
+REX_EXTERN(__imp__sub_827B8570);  // a GPU-done holder back to its free list
+static void DrainGpuDoneQueue(PPCContext &ctx, uint8_t *base) {
+  const PPCContext saved = ctx;
+  const u32 out = ctx.r1.u32 - 0x100;  // below the caller's frame; the pop is a leaf
+  for (int i = 0; i < 1024; ++i) {
+    ctx.r3.u64 = kGpuDoneQueue;
+    ctx.r4.u64 = out;
+    __imp__sub_82476A68(ctx, base);
+    if (!ctx.r3.u8)
+      break;
+    ctx.r3.u64 = u32(*GuestPtr<const be_u32>(out));
+    __imp__sub_827B8570(ctx, base);
+  }
+  ctx = saved;
+}
+BANJO_RENUT_HOOK_RAW(sub_83F29B28) {
+  const u32 device = ctx.r3.u32, buffer = ctx.r4.u32;
+  DrainGpuDoneQueue(ctx, base);
+  if (REXCVAR_GET(fc4_renut_cb_trace)) {
+    static std::atomic<uint32_t> n{0};
+    if (n.fetch_add(1) < 40)
+      RGPU_INFO("[fc4 cb] begin device {:08X} cb {:08X} flags {:X} lr {:08X}", device, buffer, ctx.r5.u32,
+                u32(ctx.lr));
+  }
+  __imp__sub_83F29B28(ctx, base);
+  if (buffer)
+    BeginRecording(device, buffer);
+}
+
+// D3DDevice_InsertAsyncCommandBufferCall 83F2A4B0 (device, async call, predication select, flags): from sub_827B4908 on
+// the title device. The original's packets go to the ring Renut does not read; the replay waits on the render thread.
+BANJO_RENUT_HOOK_RAW(sub_83F2A4B0) {
+  const u32 device = ctx.r3.u32, call = ctx.r4.u32;
+  if (IsRecordingCommandBuffer(device)) {
+    static std::atomic<bool> once{false};
+    if (!once.exchange(true))
+      RGPU_WARN("[fc4] async command buffer call {:08X} inserted into a recording (not replayed)", call);
+  } else {
+    QueueAsyncCommandBufferCall(device, call);
+  }
+  if (REXCVAR_GET(fc4_renut_cb_trace)) {
+    static std::atomic<uint32_t> n{0};
+    if (n.fetch_add(1) < 20)
+      RGPU_INFO("[fc4 cb] insert async call {:08X} on device {:08X} lr {:08X}", call, device, u32(ctx.lr));
+  }
+  __imp__sub_83F2A4B0(ctx, base);
+}
+
+// D3DAsyncCommandBufferCall_FixupAndSignal 83F2AB60 (call, buffers[], predication selects[], count, flags): from
+// sub_827EF9C0 after a worker device recorded the buffer.
+BANJO_RENUT_HOOK_RAW(sub_83F2AB60) {
+  const u32 call = ctx.r3.u32, list = ctx.r4.u32, count = ctx.r6.u32;
+  std::vector<u32> buffers;
+  if (const be_u32 *p = list ? GuestPtr<const be_u32>(list) : nullptr)
+    for (u32 i = 0; i < count && i < 64; ++i)
+      buffers.push_back(u32(p[i]));
+  if (REXCVAR_GET(fc4_renut_cb_trace)) {
+    static std::atomic<uint32_t> n{0};
+    if (n.fetch_add(1) < 20)
+      RGPU_INFO("[fc4 cb] fixup async call {:08X}: {} buffer(s), first {:08X}", call, buffers.size(),
+                buffers.empty() ? 0u : buffers[0]);
+  }
+  __imp__sub_83F2AB60(ctx, base);
+  SignalAsyncCommandBufferCall(call, buffers);
+}
+
+// fc4-nx (2026-11-09, debug, fc4_renut_cb_trace): the command buffer holders' way back to their pool (GPU-done callback
+// sub_827B34F0 -> queue 0x84239250 -> allocator drain sub_827BA778 -> sub_827B8570).
+namespace {
+std::atomic<uint32_t> g_pool_counts[3];
+void PoolNote(int i, const char *what, u32 a) {
+  const uint32_t n = g_pool_counts[i].fetch_add(1) + 1;
+  if (REXCVAR_GET(fc4_renut_cb_trace) && (n <= 3 || (n & (n - 1)) == 0))
+    RGPU_INFO("[fc4 pool] {} #{} ({:08X}) | callback {} drain {} return {}", what, n, a, g_pool_counts[0].load(),
+              g_pool_counts[1].load(), g_pool_counts[2].load());
+}
+}  // namespace
+BANJO_RENUT_HOOK_RAW(sub_827B34F0) { PoolNote(0, "gpu-done callback", ctx.r3.u32); __imp__sub_827B34F0(ctx, base); }
+BANJO_RENUT_HOOK_RAW(sub_827BA778) { PoolNote(1, "allocator drain", ctx.r3.u32); __imp__sub_827BA778(ctx, base); }
+BANJO_RENUT_HOOK_RAW(sub_827B8570) { PoolNote(2, "returned", ctx.r3.u32); __imp__sub_827B8570(ctx, base); }

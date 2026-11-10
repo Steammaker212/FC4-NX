@@ -289,6 +289,8 @@ HostTexture *GetDepthResolveTextureLocked(u32 texture_va, RenderScale scale,
 
 // Existing host texture for a guest texture VA, or nullptr.
 HostTexture *FindHostTextureLocked(u32 texture_va);
+// fc4-nx: the last resolve destination into this base page (virtual pages of the physical heaps mapped back).
+HostTexture *FindResolveTargetLocked(u32 base_page);
 
 void ReleaseHostTextureLocked(u32 texture_va);
 

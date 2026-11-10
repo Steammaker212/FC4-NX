@@ -12273,16 +12273,39 @@ bool ReadRenderTargetLocked(const u8 *device_state, u32 source, u32 &width, u32 
   return read_back;
 }
 
+// fc4-nx (2026-11-09): the front buffer's host texture, or the resolve destination in its memory: Far Cry 4 resolves
+// through one header and swaps another, whose fetch constant (header +0x20, dword 1) holds the virtual address.
+HostTexture *FrontBufferTextureLocked(u32 texture_va) {
+  HostTexture *texture = FindHostTextureLocked(texture_va);
+  if (texture && texture->texture && texture->slot != UINT32_MAX)
+    return texture;
+  if (const be_u32 *header = texture_va ? GuestPtr<const be_u32>(texture_va) : nullptr)
+    if (HostTexture *resolved = FindResolveTargetLocked(u32(header[8]) >> 12))
+      return resolved;
+  return texture;
+}
+
 bool FrontBufferWrittenLocked(u32 texture_va) {
-  const HostTexture *texture = FindHostTextureLocked(texture_va);
+  const HostTexture *texture = FrontBufferTextureLocked(texture_va);
   return texture && texture->texture && texture->gpu_written;
 }
 
 PresentImage FrontBufferImageLocked(u32 texture_va) {
   PresentImage image;
-  HostTexture *texture = FindHostTextureLocked(texture_va);
-  if (!texture || !texture->texture || texture->slot == UINT32_MAX)
+  HostTexture *texture = FrontBufferTextureLocked(texture_va);
+  if (!texture || !texture->texture || texture->slot == UINT32_MAX) {
+    // fc4-nx (2026-11-09): why the frame has no image (the window stayed black, drain1).
+    static uint32_t misses = 0;
+    if (++misses <= 3 || (misses & (misses - 1)) == 0) {
+      const be_u32 *h = texture_va ? GuestPtr<const be_u32>(texture_va) : nullptr;
+      RGPU_WARN("[renut] front buffer {:08X} has no host image ({}; miss #{}; header {:08X} {:08X} {:08X} {:08X} "
+                "{:08X} {:08X} {:08X} {:08X})", texture_va,
+                !texture ? "no host texture" : !texture->texture ? "no texture" : "no descriptor slot", misses,
+                h ? u32(h[0]) : 0, h ? u32(h[1]) : 0, h ? u32(h[2]) : 0, h ? u32(h[3]) : 0, h ? u32(h[8]) : 0,
+                h ? u32(h[9]) : 0, h ? u32(h[10]) : 0, h ? u32(h[11]) : 0);
+    }
     return image;
+  }
   image.texture = texture->texture.get();
   image.layout = &texture->layout;
   image.descriptor = texture->slot;

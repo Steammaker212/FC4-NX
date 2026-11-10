@@ -1072,6 +1072,20 @@ HostTexture *FindHostTextureLocked(u32 texture_va) {
   return it != g_textures.end() ? it->second.get() : nullptr;
 }
 
+// fc4-nx (2026-11-09): the last resolve destination into a base address (4 KB page). The page may be a CPU virtual one,
+// as in Far Cry 4's front buffer headers (D3D's Swap converts it; fb1: 0xF4DBF = physical 0x14DC0): the physical heaps'
+// views at 0xA0000000 / 0xC0000000 / 0xE0000000 (the last 4 KB higher) map back to their physical page.
+HostTexture *FindResolveTargetLocked(u32 base_page) {
+  if (base_page >= 0xE0000)
+    base_page = base_page - 0xE0000 + 1;
+  else if (base_page >= 0xC0000)
+    base_page -= 0xC0000;
+  else if (base_page >= 0xA0000)
+    base_page -= 0xA0000;
+  auto it = g_resolve_targets.find(base_page);
+  return it != g_resolve_targets.end() ? it->second : nullptr;
+}
+
 void ReleaseHostTextureLocked(u32 texture_va) {
   auto it = g_textures.find(texture_va);
   if (it == g_textures.end())

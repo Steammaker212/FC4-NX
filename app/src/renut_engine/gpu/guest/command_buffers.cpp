@@ -24,6 +24,8 @@
 
 #include <fmt/format.h>
 #include <chrono>
+#include <condition_variable>  // fc4-nx: async command buffer calls
+#include <deque>
 #if defined(__SWITCH__)
 #include <unistd.h>  // banjo-nx (2026-10-28): sbrk (ReleaseSpareBuffersWhenHeapShort)
 extern "C" char *fake_heap_end;  // libnx: the end of the malloc heap
@@ -3454,6 +3456,104 @@ CommandBufferMemory CommandBufferMemoryUsage() {
   }
   usage.live = g_live_buffers.load(std::memory_order_relaxed);
   return usage;
+}
+
+// fc4-nx (2026-11-09): async command buffer calls (docs/fc4-notes.md). Far Cry 4 reserves a place in the title device's
+// frame with D3DDevice_InsertAsyncCommandBufferCall, records command buffers on its worker devices, and hands them to
+// that place later with D3DAsyncCommandBufferCall_FixupAndSignal (the console's GPU waits there until then). Here the
+// render thread waits at the place for the call's fixup (either may come first) and replays the buffers with the title
+// device's state at the insert (the constants they inherit), as QueueRunCommandBuffer does.
+namespace {
+struct AsyncCall {
+  std::mutex mutex;
+  std::condition_variable cv;
+  bool inserted = false;   // under g_async_mutex
+  bool signalled = false;  // under mutex (and g_async_mutex when set)
+  BufferSet buffers;
+  std::vector<u32> command_buffers;
+};
+std::mutex g_async_mutex;
+std::unordered_map<u32, std::deque<std::shared_ptr<AsyncCall>>> g_async_calls;  // not both inserted and fixed up yet
+std::atomic<uint32_t> g_async_timeouts{0};
+
+void DropAsyncLocked(std::deque<std::shared_ptr<AsyncCall>> &queue, const std::shared_ptr<AsyncCall> &call) {
+  queue.erase(std::remove(queue.begin(), queue.end(), call), queue.end());
+}
+}  // namespace
+
+void QueueAsyncCommandBufferCall(u32 device_va, u32 async_call_va) {
+  FlushDeferredVertices(device_va);
+  const u8 *device = GuestPtr<const u8>(device_va);
+  if (!device || !async_call_va)
+    return;
+  auto running = std::make_shared<std::vector<u8>>(device, device + d3d::kDeviceSnapshotSize);
+  std::shared_ptr<AsyncCall> call;
+  {
+    std::lock_guard lock(g_async_mutex);
+    auto &queue = g_async_calls[async_call_va];
+    for (const auto &c : queue)
+      if (!c->inserted) {
+        call = c;
+        break;
+      }
+    if (!call) {
+      call = std::make_shared<AsyncCall>();
+      queue.push_back(call);
+    }
+    call->inserted = true;
+    if (call->signalled)
+      DropAsyncLocked(queue, call);
+  }
+  render_thread::Queue([call, running, async_call_va] {
+    std::unique_lock lock(call->mutex);
+    if (!call->cv.wait_for(lock, std::chrono::milliseconds(1000), [&] { return call->signalled; })) {
+      const uint32_t n = g_async_timeouts.fetch_add(1) + 1;
+      if (n <= 3 || (n & (n - 1)) == 0)
+        RGPU_WARN("[fc4] async command buffer call {:08X}: no fixup after 1 s, skipped (#{})", async_call_va, n);
+      return;  // its late fixup still pairs with this insert (and drops it)
+    }
+    const u8 *state = running->data();
+    for (u32 command_buffer : call->command_buffers)
+      Replay(state, call->buffers, command_buffer, 0, Predication(state));
+  });
+}
+
+void SignalAsyncCommandBufferCall(u32 async_call_va, const std::vector<u32> &command_buffers) {
+  BufferSet buffers;
+  {
+    std::lock_guard lock(g_record_mutex);
+    for (u32 command_buffer : command_buffers)
+      if (command_buffer)
+        CaptureBuffers(command_buffer, 0, buffers);
+  }
+  if (ShadowSortOn()) {
+    for (const auto &[va, recording] : buffers)
+      if (recording)
+        PlanSortedRuns(*recording);
+  }
+  std::shared_ptr<AsyncCall> call;
+  {
+    std::lock_guard lock(g_async_mutex);
+    auto &queue = g_async_calls[async_call_va];
+    for (const auto &c : queue)
+      if (!c->signalled) {
+        call = c;
+        break;
+      }
+    if (!call) {
+      call = std::make_shared<AsyncCall>();
+      queue.push_back(call);
+    }
+    {
+      std::lock_guard call_lock(call->mutex);
+      call->buffers = std::move(buffers);
+      call->command_buffers = command_buffers;
+      call->signalled = true;
+    }
+    if (call->inserted)
+      DropAsyncLocked(queue, call);
+  }
+  call->cv.notify_all();
 }
 
 } // namespace renut::gpu

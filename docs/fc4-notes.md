@@ -353,3 +353,27 @@ the game stops swapping at frame ~78. Causes found, in order (thread dumps: FC4_
    fc4_renut_async_locks = false (byte 0x84126AF8) takes the game's synchronous path, which hits the same crash sooner.
 
 Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp).
+
+## 2026-11-09: Renut renders FC4 on PC (async command buffers, front buffer)
+
+- Item 3 above was not the sync path: FC4 uses **async command buffer calls**. Main thread: sub_827B4908 ->
+  D3DDevice_InsertAsyncCommandBufferCall 83F2A4B0 (device, call, predication, flags) + InsertFence 83F2EF80 + a GPU
+  callback sub_827B34F0(holder). Workers (job sub_838B8998 -> sub_838B8598 -> sub_827EF9C0): BeginCommandBuffer
+  83F29B28 on one of the 8 type-2 devices, record, D3DAsyncCommandBufferCall_FixupAndSignal 83F2AB60 (call, buffers[],
+  predications[], count, flags). CreateAsyncCommandBufferCall = 83F29518, the game's CreateCommandBuffer-like = 83F290F0
+  (r4 alloc callback +0xAC = sub_827BAAB0, +0xB0/+0xB4 nullsub, r7 context +0xA4, r8 size +0xA8; 256 made at boot).
+- Renut: FC4's originals of Begin/End are kept (they set/clear device +13920, which is Renut's recording test);
+  fc4_hooks.cpp adds BeginRecording after Begin, and command_buffers.cpp QueueAsyncCommandBufferCall /
+  SignalAsyncCommandBufferCall: the render thread waits at the insert's place (1 s timeout) for the call's fixup (either
+  order) and replays its buffers with the title device's state at the insert.
+- The holders come back through the GPU-done queue 0x84239250, which only the game's allocator drains (when D3D calls
+  the buffer's memory callback, which Renut's ring rewinds never do): drained at each Begin (pop sub_82476A68,
+  sub_827B8570 -> free list 0x8423A3C8). Without it the 256 ran out -> Begin with a null buffer -> FATAL 83F29AB0.
+- **Front buffer**: FC4 resolves into one header (e.g. B4D58068, base 0x14DC0000) and swaps another (B59D0508/0540)
+  whose fetch constant holds the virtual address (0xF4DBF000 = physical 0x14DC0000 in the E heap). Present looked up
+  only by header -> no image (black window, "no hay imagen"). draw.cpp FrontBufferTextureLocked falls back to the resolve
+  destination at that page (textures.cpp FindResolveTargetLocked maps the A/C/E views back).
+- Result (fb2, rintro1-3): Far Cry 4 logo animation, title "PRESS A TO START", Dunia logo, autosave notice and the
+  Campaign menu's 3D elephant scene render correctly at 30 fps, no crash in 300 s.
+- Menu script for this build: title A presses 10..35 s, Campaign shows NEW GAME / UPLAY by ~42 s (UPLAY and START
+  (ONLINE) give "requires Xbox Live"); then NEW GAME, DOWN, START (OFFLINE).
