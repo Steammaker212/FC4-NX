@@ -83,6 +83,13 @@ std::unordered_map<u32, HostTexture *> g_depth_words;
 // textures are views of memory, and a game may resolve through one header and
 // sample the same memory through another.
 std::unordered_map<u32, HostTexture *> g_resolve_targets;
+// fc4-nx (2026-11-10, banjo_renut_resolve_any_size): the header each page-keyed resolve destination was last resolved
+// through, and each header's latest page key. A page that is not its header's latest goes once unused for
+// kStaleResolvePageFrames (ReleaseStaleResolvePagesLocked): FC4's dynamic resolution moves its resolves to a new page
+// almost every frame, and these GPU-written images were never released (the console's memory ran out at New Game).
+std::unordered_map<u32, u32> g_page_slot_header;  // slot key -> header VA
+std::unordered_map<u32, u32> g_header_page_slot;  // header VA -> slot key
+constexpr uint64_t kStaleResolvePageFrames = 8;
 std::unordered_map<uint64_t, uint32_t> g_samplers;  // sampler key -> slot
 std::vector<std::unique_ptr<plume::RenderSampler>> g_sampler_objects;
 uint64_t g_frame = 1;
@@ -846,6 +853,11 @@ HostTexture *ResolveTarget(u32 texture_va, plume::RenderFormat format, RenderSca
   slot->gpu_written = true;
   slot->uploaded = true;
   slot->used_frame = g_frame;
+  if (by_base) {
+    const u32 key = ResolveSlotKey(fetch.BasePage());
+    g_page_slot_header[key] = texture_va;
+    g_header_page_slot[texture_va] = key;
+  }
   HostTexture *&entry = g_resolve_targets[fetch.BasePage()];
   if (entry != slot.get()) {
     entry = slot.get();
@@ -1054,10 +1066,36 @@ uint64_t g_texture_epoch = 1;  // banjo-nx (2026-10-19, CPU proposal 2)
 uint64_t g_layout_epoch = 1;   // banjo-nx (2026-10-26): see textures.h
 uint64_t g_depth_epoch = 1;    // banjo-nx (2026-10-19, render-thread proposal 3)
 
+// fc4-nx (2026-11-10): see g_page_slot_header.
+static void ReleaseStaleResolvePagesLocked() {
+  std::vector<u32> stale;
+  for (const auto &[key, header] : g_page_slot_header) {
+    const auto latest = g_header_page_slot.find(header);
+    if (latest != g_header_page_slot.end() && latest->second == key)
+      continue;
+    const auto it = g_textures.find(key);
+    if (it == g_textures.end() || !it->second || g_frame - it->second->used_frame >= kStaleResolvePageFrames)
+      stale.push_back(key);
+  }
+  for (u32 key : stale) {
+    ReleaseHostTextureLocked(key);
+    g_page_slot_header.erase(key);
+  }
+  static uint64_t released = 0, logged_at = 0;
+  released += stale.size();
+  if (released && g_frame - logged_at >= 300) {
+    RGPU_INFO("[renut] resolve pages: {} stale page-keyed destinations released, {} held",
+              std::exchange(released, 0), g_page_slot_header.size());
+    logged_at = g_frame;
+  }
+}
+
 void AdvanceTextureFrameLocked() {
   ++g_frame;
   g_texture_frame = g_frame;
   ApplyUnlocksLocked();
+  if (g_frame % 4 == 0)
+    ReleaseStaleResolvePagesLocked();
   if (g_frame % kEvictCheckFrames == 0)
     EvictIdleTexturesLocked();
   // banjo-nx: banjo_renut_memory_policy. Every kColdCheckFrames frames, and under pressure every second.

@@ -527,3 +527,14 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   02:25:22 and 02:27:33); the hw3 test (switch_profile_stacks on, threads spread by Xbox core) felt longer. To
   measure from hw3's rex_profile.log stacks: which threads run during the load and where (SD reads, the vfs/range
   cache, decompression, shader or texture creation), then cut it.
+
+## Console runs hw3/hw4 (2026-11-10): faster, then out of memory at New Game
+- Title and menus at 29-30 fps (12-18 in hw2): the cores spread and the sys-clk hold.
+- hw3: three launches ended in std::bad_alloc in the capture thread (nfsmw_nativo_captura.cpp Bucle -> Chunk) at the
+  title->menu spike (GPU images 1.0-1.1 GB). hw4 (captures off): the KYRAT load stalls (the loading screen keeps
+  drawing at 29 fps, the bar stops): 491 "AllocFixed: could not commit" (guest backing 456 MB, process 3 MB unused,
+  deko3d images 848 MB, Renut textures 913 of 915 MB). hw2 had images at 374-480 MB with a 754 MB spike.
+- Cause: banjo_renut_resolve_any_size keyed resolve destinations by base page, and FC4's resolves move to a new page
+  almost every frame; GPU-written images are never idle-evicted (banjo_renut_keep_gpu_written), so they piled up.
+  Now a page-keyed destination that is not its header's latest goes after 8 unused frames
+  (ReleaseStaleResolvePagesLocked). PC: 534 released in the first 10 s of boot, ~40 held after.
