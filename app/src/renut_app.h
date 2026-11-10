@@ -63,6 +63,7 @@ REXCVAR_DECLARE(bool, banjo_gpu_boost);
 REXCVAR_DECLARE(bool, banjo_renut_linked_stages);  // renut_engine/gpu/banjo_renut_tuning.cpp
 #endif
 REXCVAR_DECLARE(bool, banjo_gpu_zcull_greater);
+namespace fc4 { void StartStackReport(); }  // src/fc4_stack_report.cpp (PC: fc4_stack_report_s)
 REXCVAR_DECLARE(int32_t, fc4_clock_cpu_mhz);  // src/fc4_switch_settings.cpp
 REXCVAR_DECLARE(int32_t, fc4_clock_gpu_mhz);
 #if REX_PLATFORM_SWITCH
@@ -234,6 +235,7 @@ public:
         // katamari-nx (2026-10-31): DLC packages in the "dlc" folder next to the NRO / exe installed before the game
         // starts (reNut upstream's installer, renut_engine/dlc_install.cpp, as banjo-nx does).
         renut::dlc::InstallPackages(runtime());
+        fc4::StartStackReport();  // fc4-nx (2026-11-10): off unless fc4_stack_report_s
         // One log line with every enhancement and whether it is active (src/cpu/banjo_enhancements.h).
         banjo::LogEnhancements();
         // katamari-nx (2026-11-01): katamari_diag_game_state (off): the stage fields of the game state, as they change.

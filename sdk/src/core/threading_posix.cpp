@@ -902,7 +902,7 @@ bool g_joining = false;             // Loop has taken an item and not joined it 
  */
 // Only the guest threads' 16 MB stacks. The SDK's own threads (4 MB by default, long-lived) stay with libnx as
 // before, and their blocks never take the pool's places.
-constexpr size_t kPoolMinStack = size_t(8) << 20;
+constexpr size_t kPoolMinStack = size_t(2) << 20;  // fc4-nx (2026-11-10): guest stacks may be 4 MB (guest_thread_host_stack_kb)
 constexpr size_t kPoolMaxBlocks = 4;
 constexpr size_t kPoolMaxBytes = size_t(80) << 20;  // four guest stacks (16 MB each, with their TLS)
 struct Stack {
@@ -1208,6 +1208,18 @@ class PosixCondition<Thread> : public PosixConditionBase {
       if (created == 0) {
         REXSYS_WARN("[threads] the thread was created at attempt {}", attempt + 1);
       }
+    }
+    /*
+     * fc4-nx (2026-11-10): still none: a smaller stack from the heap (halved down to 1 MB) rather than a thread that
+     * never runs. Far Cry 4 froze for good after its intro movie: "heap has NO a 16448 KB block" with 135 MB free in
+     * 38,000 pieces, and the game waited for that thread forever.
+     */
+    for (size_t smaller = params.stack_size / 2; created != 0 && smaller >= (size_t(1) << 20); smaller /= 2) {
+      if (pthread_attr_setstacksize(&attr, smaller) != 0)
+        break;
+      created = pthread_create(&thread_, &attr, ThreadStartRoutine, start_data);
+      REXSYS_WARN("[threads] a {} KB stack instead of {} KB: {}", smaller >> 10, params.stack_size >> 10,
+                  created == 0 ? "created" : "failed too");
     }
 #else
     int created = pthread_create(&thread_, &attr, ThreadStartRoutine, start_data);

@@ -104,6 +104,7 @@ set(RENUT_SOURCES
     src/cpu/katamari_stage_diag.cpp
     src/fc4_debug_watch.cpp
     src/fc4_switch_settings.cpp
+    src/fc4_stack_report.cpp
     # katamari-nx: the native copies of hot game functions (banjo_hot_guest.cpp and its shards), from this game's PC
     # profile (docs/katamari-notes.md, "Hot functions"): src/cpu/hot/localized.txt and hand.txt.
     src/cpu/banjo_hot_guest.cpp

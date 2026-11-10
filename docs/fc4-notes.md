@@ -553,3 +553,13 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   a second, plume Deko3DReleaseEmptyChunks).
 - Icon: tools/switch/make_fc4_icon.py makes tools/switch/icon/fc4_icon.jpg (256x256) from the disc's SPLASH_720.PNG;
   git-ignored (game-derived), embedded by app/CMakeLists.txt (reconfigure after making it).
+- hw7 (memory retry in): the KYRAT load finished in ~50 s (hw2: 131 s) and the intro movie played; it froze where the
+  movie ends: "[threads] creating a thread with a 16384 KB stack failed ... heap has NO a 16448 KB block (free 135 MB in
+  38,000 pieces)", four times, and the game waited for that thread for ever. 26 guest-thread stacks of 16 MB came from
+  the heap (~420 MB). Now guest_thread_host_stack_kb (sdk xthread.cpp; the Switch defaults take 4096) and a creation
+  that still fails tries halved stacks down to 1 MB (threading_posix.cpp). Measured on PC (fc4_stack_report_s, the
+  deepest non-zero word of each zeroed stack): the deepest guest thread used 35 KB through boot, menus, load, the movie
+  and the in-engine dinner scene, so 4 MB has >100x room.
+- NSP forwarder: tools/switch/make_fc4_nsp.sh (nx-hbloader with its default NRO set to sdmc:/switch/fc4-nx/fc4-nx.nro,
+  back to HOME when the game exits: tools/switch/forwarder; hacbrewpack 3.05 built from source, the rlaphoenix mirror
+  of The-4n's, in ../nsp_tools; prod.keys filtered to 32/64-digit keys into out/nsp). Title ID 01FC4F00C4000000.

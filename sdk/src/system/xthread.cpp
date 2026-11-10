@@ -50,6 +50,13 @@ REXCVAR_DEFINE_BOOL(ignore_thread_priorities, true, "Kernel",
 REXCVAR_DEFINE_BOOL(ignore_thread_affinities, true, "Kernel",
                     "Ignores game-specified thread affinities");
 
+REXCVAR_DEFINE_INT32(guest_thread_host_stack_kb, 16384, "Kernel",
+                     "Host stack of each guest thread, in KB (the recompiled code's frames; the guest's own stack is in "
+                     "guest memory). fc4-nx: Far Cry 4 runs ~30 guest threads, 16 MB each was ~420 MB of the Switch's "
+                     "heap; its Switch defaults take 4096")
+    .range(1024, 65536)
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
 REXCVAR_DEFINE_BOOL(xbox_core_spread, true, "Kernel",
                     "Switch: each guest thread prefers the core matching the Xbox core the game put it on (hardware "
                     "threads 0-1, 2-3, 4-5 -> cores 0, 1, 2), allowed on all three. Off: the system default core")
@@ -503,7 +510,7 @@ X_STATUS XThread::Create() {
   RetainHandle();
 
   rex::thread::Thread::CreationParameters params;
-  params.stack_size = 16_MiB;  // Allocate a big host stack.
+  params.stack_size = size_t(REXCVAR_GET(guest_thread_host_stack_kb)) << 10;  // a big host stack (was 16 MiB)
   params.create_suspended = true;
   thread_ = rex::thread::Thread::Create(params, [this]() {
     rex::initialize_seh_thread();
@@ -1502,7 +1509,7 @@ object_ref<XThread> XThread::Restore(KernelState* kernel_state, stream::ByteStre
 
     rex::thread::Thread::CreationParameters params;
     params.create_suspended = true;  // Not done restoring yet.
-    params.stack_size = 16_MiB;
+    params.stack_size = size_t(REXCVAR_GET(guest_thread_host_stack_kb)) << 10;  // (was 16 MiB)
     thread->thread_ = rex::thread::Thread::Create(params, [thread, state]() {
       // Set thread ID override. This is used by logging.
       rex::thread::set_current_thread_id(thread->handle());
