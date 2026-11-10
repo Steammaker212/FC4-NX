@@ -331,6 +331,8 @@ void FlushResolveMipsLocked(HostTexture &t);
 // (plume's Vulkan resolve writes every level of its destination, from levels
 // the source does not have). Its texture and layout only; kept for reuse.
 HostTexture *ResolveStagingLocked(const HostTexture *dest);
+// fc4-nx (2026-11-10): the 2x2-box pipeline (texture_mip_ps) for targets of 'format'; null without the shader.
+plume::RenderPipeline *TextureMipPipelineLocked(plume::RenderFormat format);
 
 // Bindless sampler slot matching the device fetch constant's sampler state.
 // 'lod_scale' (TextureBinding::lod_scale): a texture with host levels, which

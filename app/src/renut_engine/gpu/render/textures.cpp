@@ -1746,6 +1746,10 @@ HostTexture *ResolveStagingLocked(const HostTexture *dest) {
   return scratch ? &scratch->target : nullptr;
 }
 
+plume::RenderPipeline *TextureMipPipelineLocked(plume::RenderFormat format) {
+  return State().texture_mip_ps ? MipPipeline(format) : nullptr;
+}
+
 void UpdateResolveMipsLocked(HostTexture *texture, const plume::RenderRect &rect) {
   auto &s = State();
   plume::RenderCommandList *cmd = Video::CommandListLocked();

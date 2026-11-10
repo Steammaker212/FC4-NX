@@ -60,6 +60,15 @@ extern "C" char *fake_heap_end;  // libnx: the end of the malloc heap
 
 // banjo-nx (2026-10-17, a diagnostic for the deko3d renderer's missing river water): draws that read memexport results
 // as vertices take them through the CPU path (wait for the export, read it back) instead of stream_convert_cs.
+REXCVAR_DEFINE_BOOL(banjo_renut_tile_replays, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-10): in a target grown for a tiled pass (banjo_renut_resolve_extents), draws "
+                    "with a later tile's window offset are not drawn (the pass without an offset covers the screen); "
+                    "false: drawn shifted by the offset, as before");
+REXCVAR_DEFINE_BOOL(banjo_renut_resolve_fixed_clamp, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-10): a colour resolve into a fixed-point texture format (8_8_8_8, 2_10_10_10, 16, "
+                    "16_16, 16_16_16_16 ...) from a float or signed target, or with an exponent bias, is drawn with the "
+                    "bias applied and clamped to 0..1, as the console writes it (unsigned). Renut copied the target's "
+                    "values as they were (HDR above 1, negatives) and applied the bias where they were sampled");
 REXCVAR_DEFINE_BOOL(banjo_renut_diag_no_stream_convert, false, "Banjo/Renut",
                     "Diagnostic: exported streams reach their draws through the CPU (no stream_convert_cs)");
 // banjo-nx (2026-10-17, a diagnostic for the depth of field that banjo_gpu_blend_skip breaks): pixel shaders (their
@@ -1935,12 +1944,19 @@ ViewportState ComputeViewportSlow(const GuestDevice &device, const Targets &t) {
 
   // PA_SU_SC_MODE_CNTL.vtx_window_offset_enable adds PA_SC_WINDOW_OFFSET.
   int32_t wx = 0, wy = 0;
+  bool later_tile = false;
   if (u32(dev.m_ControlPacket.ModeControl) & 0x10000) {
     const u32 offset = dev.m_WindowPacket.WindowOffset;
     wx = int32_t(offset << 17) >> 17;
     wy = int32_t(offset << 1) >> 17;
     xo += float(wx);
     yo += float(wy);
+    // fc4-nx (2026-11-10, banjo_renut_tile_replays): FC4's tiled G-buffer runs its passes once per tile, the later
+    // tiles with a window offset (-864, 0). Renut draws every tile into one target grown to the screen
+    // (HostSurface::tiled), which the pass without an offset covers whole: the later tiles' draws landed shifted onto
+    // the first tile (the left third of the picture). They are left undrawn (an empty scissor).
+    const HostSurface *first = t.color_count ? t.colors[0] : t.depth;
+    later_tile = (wx < 0 || wy < 0) && first && first->tiled && REXCVAR_GET(banjo_renut_tile_replays);
   }
   // A draw predicated to one tile renders into that tile's EDRAM only, which
   // the GPU resolves to the tile's rect of the screen: it is cut to the rect.
@@ -2026,6 +2042,14 @@ ViewportState ComputeViewportSlow(const GuestDevice &device, const Targets &t) {
   sy1 = std::clamp(sy1, 0, int32_t(t.height));
   sx2 = std::clamp(sx2, sx1, int32_t(t.width));
   sy2 = std::clamp(sy2, sy1, int32_t(t.height));
+  if (later_tile) {
+    sx2 = sx1;
+    sy2 = sy1;
+    static uint32_t logged = 0;
+    if (logged++ < 2)
+      RGPU_INFO("[renut] a draw in a later tile (window offset {},{}) of a target grown for tiling: not drawn again "
+                "(banjo_renut_tile_replays)", wx, wy);
+  }
 
   // All of the above is in guest pixels; the host targets are t.scale times
   // that. Depth is not scaled.
@@ -9655,6 +9679,24 @@ bool DrawStateLocked(const u8 *device_state, const DrawCall &call, const ReplayC
   const GuestDevice device(device_state);
   if (!device.valid())
     return false;
+  if (banjo::renut_gpu::ResolveTraceOn() && g_trace_draws <= 3) {
+    // fc4-nx (2026-11-10, diagnostic): the first draws' depth/stencil/colour state after each change of targets.
+    const d3d::Device &dev = device.dev();
+    RGPU_INFO("[trace]   draw {}: depth control {:08X} colour mask {:08X} stencil {:08X}/{:08X} colour control {:08X} "
+              "hi {:08X} mode {:08X} vte {:08X} colour0 info {:08X} depth info {:08X} window scissor {:08X}-{:08X} "
+              "screen scissor {:08X}-{:08X} blend0 {:08X} window offset {:08X} clip {:08X} z scale {} offset {} xy scale {} {}",
+              g_trace_draws, u32(dev.m_ControlPacket.DepthControl), u32(dev.m_ValuesPacket.ColorMask),
+              u32(dev.m_ValuesPacket.StencilRefMask), u32(dev.m_ValuesPacket.StencilRefMaskBF),
+              u32(dev.m_ControlPacket.ColorControl), u32(dev.m_ControlPacket.HiControl),
+              u32(dev.m_ControlPacket.ModeControl), u32(dev.m_ControlPacket.VteControl),
+              u32(dev.m_DestinationPacket.Color0Info), u32(dev.m_DestinationPacket.DepthInfo),
+              u32(dev.m_WindowPacket.WindowScissorTL), u32(dev.m_WindowPacket.WindowScissorBR),
+              u32(dev.m_DestinationPacket.ScreenScissorTL), u32(dev.m_DestinationPacket.ScreenScissorBR),
+              u32(dev.m_ControlPacket.BlendControl0), u32(dev.m_WindowPacket.WindowOffset),
+              u32(dev.m_ControlPacket.ClipControl), float(dev.m_ValuesPacket.VportZScale),
+              float(dev.m_ValuesPacket.VportZOffset), float(dev.m_ValuesPacket.VportXScale),
+              float(dev.m_ValuesPacket.VportYScale));
+  }
 
   const u32 vs_va = device.U32(d3d::kDeviceOffsetVertexShader);
   auto *vs = FindShaderLocked(vs_va, RecordKind::VertexShader);
@@ -11394,8 +11436,9 @@ namespace {
 void ClearTargets(const Targets &t, u32 flags, const plume::RenderRect &rect, const float color[4],
                   float depth, u32 stencil) {
   if (banjo::renut_gpu::ResolveTraceOn()) {
-    RGPU_INFO("[trace] clear {:X} rect ({},{})-({},{}) of {}x{}", flags, rect.left, rect.top, rect.right, rect.bottom,
-              t.width, t.height);
+    RGPU_INFO("[trace] clear {:X} rect ({},{})-({},{}) of {}x{}: colour {} {} {} {}, depth {}, stencil {}", flags,
+              rect.left, rect.top, rect.right, rect.bottom, t.width, t.height, color[0], color[1], color[2], color[3],
+              depth, stencil);
   }
   if (rect.right <= rect.left || rect.bottom <= rect.top)
     return;
@@ -11750,8 +11793,24 @@ void DepthHandOverBeforeBindLocked(HostSurface *surface, const plume::RenderRect
 // fences with a full barrier before and after (the 3D engine idle for the whole copy); a draw is ordered by the usual
 // fragment barriers and overlaps the work around it. Same format both sides, 2D level 0, slice 0: every texel is written
 // back bit for bit. 'rect' is the source rect and (host_x, host_y) its place in the destination, in host pixels.
+// fc4-nx (2026-11-10): a host colour format whose values are always 0..1.
+bool IsUnormColorFormat(plume::RenderFormat format) {
+  switch (format) {
+  case plume::RenderFormat::R8G8B8A8_UNORM:
+  case plume::RenderFormat::B8G8R8A8_UNORM:
+  case plume::RenderFormat::R16G16B16A16_UNORM:
+  case plume::RenderFormat::R16G16_UNORM:
+  case plume::RenderFormat::R8G8_UNORM:
+  case plume::RenderFormat::R8_UNORM:
+  case plume::RenderFormat::R16_UNORM:
+    return true;
+  default:
+    return false;
+  }
+}
+
 bool DrawResolveCopy(HostSurface *surface, HostTexture *dest, const plume::RenderRect &rect, uint32_t host_x,
-                     uint32_t host_y) {
+                     uint32_t host_y, float clamp_scale = 0.0f) {
   auto &s = State();
   if (!s.resolve_copy_ps || !dest->texture || !dest->render_target || dest->host_format != surface->format ||
       dest->dimension != TextureDimension::Tex2D || dest->stacked)
@@ -11771,6 +11830,11 @@ bool DrawResolveCopy(HostSurface *surface, HostTexture *dest, const plume::Rende
   case plume::RenderFormat::R32G32_FLOAT:
   case plume::RenderFormat::R32G32B32A32_FLOAT:
     break;
+  case plume::RenderFormat::R16G16_SNORM:  // fc4-nx (2026-11-10): clamped to 0..1, so exact
+  case plume::RenderFormat::R16G16B16A16_SNORM:
+    if (clamp_scale > 0.0f)
+      break;
+    return false;
   default:
     return false;
   }
@@ -11817,6 +11881,7 @@ bool DrawResolveCopy(HostSurface *surface, HostTexture *dest, const plume::Rende
   push.translate[1] = float(rect.top - int32_t(host_y));
   push.texture_index = source_slot;
   push.sampler_index = kPointClampSamplerSlot;
+  push.param1 = clamp_scale;  // fc4-nx (2026-11-10): > 0, the bias and the 0..1 clamp (resolve_copy_ps)
   cmd->setGraphicsPushConstants(0, &push, 0, sizeof(push));
   cmd->drawInstanced(3, 1, 0, 0);
   banjo::renut_gpu::CountDrawnResolve();
@@ -11825,6 +11890,56 @@ bool DrawResolveCopy(HostSurface *surface, HostTexture *dest, const plume::Rende
   g_bound.pipeline = nullptr;
   g_bound.layout = false;
   g_bound.viewport_set = false;
+  return true;
+}
+
+// fc4-nx (2026-11-10): a resolve of a 4x-MSAA view nothing drew, from the 1x target drawn over the same EDRAM ('source',
+// twice the view's size; DownsampleSourceLocked): each texel the 2x2 box of the source's, what the console's resolve of
+// the 4x view averages. Drawn into the destination where it lands at the view's own coordinates (FC4's: at 0,0).
+bool DownsampleResolveCopy(HostSurface *source, HostTexture *dest, const plume::RenderRect &rect, uint32_t host_x,
+                           uint32_t host_y, float clamp_scale) {
+  auto &s = State();
+  if (!dest->texture || !dest->render_target || dest->host_format != source->format ||
+      dest->dimension != TextureDimension::Tex2D || dest->stacked || int32_t(host_x) != rect.left ||
+      int32_t(host_y) != rect.top)
+    return false;
+  plume::RenderPipeline *pipeline = TextureMipPipelineLocked(dest->host_format);
+  const uint32_t source_slot = pipeline ? SurfaceSampleSlotLocked(source) : kInvalidDescriptor;
+  if (source_slot == kInvalidDescriptor)
+    return false;
+  if (!dest->copy_framebuffer) {
+    const plume::RenderTexture *targets[] = {dest->texture.get()};
+    dest->copy_framebuffer = s.device->createFramebuffer(plume::RenderFramebufferDesc(targets, 1));
+    if (!dest->copy_framebuffer)
+      return false;
+  }
+  plume::RenderCommandList *cmd = s.command_list;
+  TransitionSurfaceLocked(source, plume::RenderTextureLayout::SHADER_READ);
+  TransitionTextureLocked(dest, plume::RenderTextureLayout::COLOR_WRITE);
+  cmd->setFramebuffer(dest->copy_framebuffer.get());
+  cmd->setViewports(plume::RenderViewport(0.0f, 0.0f, float(dest->alloc_width), float(dest->alloc_height)));
+  cmd->setScissors(rect);
+  cmd->setGraphicsPipelineLayout(s.utility_layout.get());
+  cmd->setPipeline(pipeline);
+  cmd->setGraphicsDescriptorSet(s.texture_set.get(), 0);
+  cmd->setGraphicsDescriptorSet(s.sampler_set.get(), 1);
+  UtilityPush push{};
+  push.scale[0] = push.scale[1] = 1.0f;
+  push.texture_index = source_slot;
+  push.sampler_index = kPointClampSamplerSlot;
+  push.param0 = 2.0f;
+  push.param1 = clamp_scale;  // fc4-nx: > 0, the bias and the 0..1 clamp (texture_mip_ps)
+  cmd->setGraphicsPushConstants(0, &push, 0, sizeof(push));
+  cmd->drawInstanced(3, 1, 0, 0);
+  g_bound.framebuffer = nullptr;
+  g_bound.pipeline = nullptr;
+  g_bound.layout = false;
+  g_bound.viewport_set = false;
+  static uint32_t logged = 0;
+  if (logged++ < 4)
+    RGPU_INFO("[renut] resolve of a 4x view nothing drew ({:08X}, {}x{}): the 2x2 box of the 1x target over its EDRAM "
+              "({:08X}, {}x{}, {} writes)", dest->guest_va, rect.right - rect.left, rect.bottom - rect.top,
+              source->guest_va, source->width, source->height, source->writes);
   return true;
 }
 
@@ -12013,17 +12128,21 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
   const u32 source_va = source == 4 ? device.U32(d3d::kDeviceOffsetDepthStencil)
                                     : device.U32(d3d::kDeviceOffsetRenderTargets + source * 4);
   HostSurface *surface = GetHostSurfaceLocked(source_va);
+  if (surface && source_rect && (source_rect->x2 > int32_t(surface->width) || source_rect->y2 > int32_t(surface->height)))
+    NoteResolveExtentLocked(surface, source_rect->x1, source_rect->y1, u32(source_rect->x2), u32(source_rect->y2));  // fc4-nx (2026-11-10)
   if (g_frame_resolve_dests.size() < 256)
     g_frame_resolve_dests.push_back(dest_texture_va);
   if (banjo::renut_gpu::ResolveTraceOn() && surface) {
     const ClearRect r = source_rect ? *source_rect : ClearRect{0, 0, -1, -1};
     RGPU_INFO("[trace] resolve {} {:08X} ({}x{} fmt {} samples {}) -> texture {:08X} at ({},{}) level {} slice {}, "
               "rect ({},{})-({},{}), flags {:X} ({}{}); view of {:08X} (info {:08X} format {:08X} size {:08X}), "
-              "{} writes",
+              "{} writes; dest fetch format {} signs {:02X} exp adjust {}",
               surface->depth ? "depth" : "colour", source_va, surface->width, surface->height, u32(surface->format),
               u32(surface->samples), dest_texture_va, dest_x, dest_y, dest_level, dest_slice, r.x1, r.y1, r.x2, r.y2,
               flags, (flags & 0x100) ? "clear colour after " : "", (flags & 0x200) ? "clear depth after" : "",
-              surface->guest_va, surface->info_word, surface->format_word, surface->size_word, surface->writes);
+              surface->guest_va, surface->info_word, surface->format_word, surface->size_word, surface->writes,
+              dest_format ? u32(dest_format->dword[1]) & 0x3F : 0xFFu, dest_format ? (u32(dest_format->dword[0]) >> 2) & 0xFF : 0u,
+              dest_format ? int32_t(u32(dest_format->dword[3]) << 13) >> 26 : 0);
   }
   plume::RenderCommandList *cmd = s.command_list;
   static uint32_t depth_logged = 0;
@@ -12093,7 +12212,13 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
       const uint32_t slice = volume ? 0 : dest_slice;
       const uint32_t z = volume ? dest_slice : 0;
       const bool fits = fit(dest, src);
-      const uint64_t sig = fits ? ResolveSignature(surface, src, dest_x, dest_y, dest_level, dest_slice) : 0;
+      // fc4-nx (2026-11-10): a 4x view nothing drew of a 1x target's EDRAM (DownsampleResolveCopy).
+      HostSurface *box_source = fits && surface->writes == 0 && dest_level == 0 && slice == 0 && z == 0
+                                    ? DownsampleSourceLocked(surface)
+                                    : nullptr;
+      uint64_t sig = fits ? ResolveSignature(surface, src, dest_x, dest_y, dest_level, dest_slice) : 0;
+      if (box_source)
+        sig ^= (box_source->writes * 0x9E3779B97F4A7C15ull) ^ (box_source->generation << 40);
       if (fits && banjo::renut_gpu::ResolveSkipOn() && dest->resolve_signature == sig) {
         // banjo-nx (2026-10-19, banjo_renut_resolve_skip): the same resolve of an unchanged source is in dest already.
         banjo::renut_gpu::CountSkippedResolve(false);
@@ -12101,6 +12226,22 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
         dest->resolve_signature = sig;
         // fc4-nx (2026-11-10): the copy exponent bias (flags bits 26-31, signed), applied where it is sampled.
         dest->resolve_exp_bias = int8_t(int32_t(flags) >> 26);
+        // fc4-nx (2026-11-10, banjo_renut_resolve_fixed_clamp): a fixed-point destination gets the bias and the 0..1
+        // clamp in the copy (the console writes unsigned data), from a target that can hold values outside 0..1 or
+        // with a bias; its binds then add nothing.
+        float clamp_scale = 0.0f;
+        if (dest_format && REXCVAR_GET(banjo_renut_resolve_fixed_clamp) && slice == 0 && z == 0) {
+          switch (u32(dest_format->dword[1]) & 0x3F) {
+          case 2: case 6: case 7: case 10: case 14: case 24: case 25: case 26: case 50: case 54: {
+            const bool wide = !IsUnormColorFormat(surface->format);
+            if (wide || dest->resolve_exp_bias != 0)
+              clamp_scale = std::ldexp(1.0f, dest->resolve_exp_bias);
+            break;
+          }
+          default:
+            break;
+          }
+        }
         g_bound.framebuffer = nullptr;
         // The destination is of the surface's scale.
         plume::RenderRect rect =
@@ -12115,7 +12256,18 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
                                           int32_t(host_x) + (rect.right - rect.left),
                                           int32_t(host_y) + (rect.bottom - rect.top));
         const bool multisampled = surface->samples != plume::RenderSampleCount::COUNT_1;
-        if (multisampled && dest->extra_levels && IsVulkan()) {
+        if (box_source && DownsampleResolveCopy(box_source, dest, rect, host_x, host_y, clamp_scale)) {
+          // fc4-nx: drawn
+          if (clamp_scale > 0.0f)
+            dest->resolve_exp_bias = 0;
+        } else if (clamp_scale > 0.0f && !multisampled && DrawResolveCopy(surface, dest, rect, host_x, host_y, clamp_scale)) {
+          dest->resolve_exp_bias = 0;  // fc4-nx: applied in the copy
+          static uint32_t clamp_logged = 0;
+          if (clamp_logged++ < 6)
+            RGPU_INFO("[renut] resolve {:08X} -> {:08X} (fetch format {}, host format {}): bias 2^{} and 0..1 clamp in the "
+                      "copy (banjo_renut_resolve_fixed_clamp)", surface->guest_va, dest->guest_va,
+                      u32(dest_format->dword[1]) & 0x3F, u32(surface->format), int32_t(int32_t(flags) >> 26));
+        } else if (multisampled && dest->extra_levels && IsVulkan()) {
           // A destination with host levels takes it through a single-level
           // target (ResolveStagingLocked): plume's Vulkan resolve writes every
           // level of its destination (D3D12's writes level 0 only, and

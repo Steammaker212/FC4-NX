@@ -41,6 +41,7 @@ extern "C" char *fake_heap_end;  // libnx: the end of the malloc heap
 #include "renut_engine/gpu/backend/render_thread.h"
 #include "renut_engine/gpu/banjo_renut_tuning.h"
 #include "renut_engine/gpu/render/draw.h"  // banjo-nx (2026-10-20): ChainHint
+#include "renut_engine/gpu/render/surfaces.h"  // fc4-nx (2026-11-10): SetTilingExtentLocked (RecordTiling)
 #include "renut_engine/gpu/guest/resources.h"  // banjo-nx (2026-10-23): PrefetchShaderLocked
 #include "renut_engine/gpu/render/texture_layout.h"  // banjo-nx (2026-10-27): the slots' extents (GetTextureDataSizes)
 #include "renut_engine/gpu/render/textures.h"  // banjo-nx (2026-10-28): TextureFrameLocked (the packet census's frames)
@@ -239,7 +240,8 @@ void ForEachGroupRun(uint64_t mask, F f) {
   }
 }
 
-enum class OpKind { Draw, Clear, Resolve, Run };
+// fc4-nx (2026-11-10): Tiling, D3D BeginTiling / EndTiling recorded into a buffer (RecordTiling).
+enum class OpKind { Draw, Clear, Resolve, Run, Tiling };
 
 // banjo-nx (2026-10-27, the replay stream, banjo_renut_replay_stream): a draw's call as its op keeps it: DrawCall's
 // values without its pointers (Draw*UP / Begin*Vertices data are arena offsets, kNoUp none) and the shaders' words as
@@ -953,7 +955,7 @@ void NoteUnmarked(const u8 *device, const u8 *shadow, uint64_t chunks, OpKind ki
     RGPU_WARN("Recording from marks: device +0x{:X} (chunk {}, +0x{:X}-0x{:X}) changed without a mark before a {} "
               "op: 0x{:08X}, was 0x{:08X}; tags {:016X} {:016X} {:016X} (banjo_renut_tags_check)",
               word, c, at, at + size - 1,
-              kind == OpKind::Draw ? "draw" : kind == OpKind::Clear ? "clear" : kind == OpKind::Resolve ? "resolve" : "run",
+              kind == OpKind::Draw ? "draw" : kind == OpKind::Clear ? "clear" : kind == OpKind::Resolve ? "resolve" : kind == OpKind::Tiling ? "tiling" : "run",
               __builtin_bswap32(now), __builtin_bswap32(was), tags[0], tags[1], tags[2]);
   }
   // banjo-nx (2026-10-26, setter rewrite): with the setters' tags kept apart, a write they covered by a tag alone
@@ -2692,6 +2694,12 @@ void Replay(const u8 *running, const BufferSet &buffers, u32 command_buffer_va, 
       op_index += merged;  // banjo-nx (2026-10-27): the ops this draw took (no state, no constants: nothing to apply)
       break;
     }
+    case OpKind::Tiling:  // fc4-nx (2026-11-10): RecordTiling
+      merge_prev = nullptr;
+      SetTilingExtentLocked(u32(op.rect.x2), u32(op.rect.y2));
+      SetTilesLocked(op.flags ? reinterpret_cast<const ClearRect *>(buffer.arena.data() + op.dest_level) : nullptr,
+                     op.flags);
+      break;
     case OpKind::Clear:
       merge_prev = nullptr;
       ClearStateLocked(state, op.flags, op.has_rect ? &op.rect : nullptr, op.color, op.depth,
@@ -3058,6 +3066,22 @@ std::string ReplayRepeatCensusReport() {
   c.op_same_draws = c.prefix_same_draws = c.compared_draws = 0;
   std::fill(std::begin(c.differ_fields), std::end(c.differ_fields), uint64_t(0));
   return out;
+}
+
+// fc4-nx (2026-11-10): see command_buffers.h.
+void RecordTiling(u32 device_va, const ClearRect *tiles, u32 count, u32 width, u32 height) {
+  HostCommandBuffer *buffer = nullptr;
+  Op *op = NewOp(device_va, OpKind::Tiling, &buffer);
+  if (!op)
+    return;
+  op->rect = ClearRect{0, 0, i32(width), i32(height)};
+  op->flags = 0;
+  if (tiles && count && buffer) {
+    const size_t offset = Reserve(*buffer, count * sizeof(ClearRect));
+    std::memcpy(buffer->arena.data() + offset, tiles, count * sizeof(ClearRect));
+    op->flags = count;
+    op->dest_level = u32(offset);
+  }
 }
 
 void RecordRun(u32 device_va, u32 command_buffer_va) {

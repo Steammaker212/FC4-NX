@@ -3206,7 +3206,27 @@ namespace plume {
 
         psoDesc.InputLayout = { inputElements.data(), UINT(inputElements.size()) };
 
-        device->d3d->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&d3d));
+        const HRESULT fc4Res = device->d3d->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&d3d));
+        // fc4-nx (2026-11-10): why a pipeline failed (with FC4_D3D12_DEBUG=1, the debug layer's messages).
+        if (FAILED(fc4Res)) {
+            fprintf(stderr, "[plume] CreateGraphicsPipelineState failed with error code 0x%lX\n", fc4Res);
+            ID3D12InfoQueue *fc4Queue = nullptr;
+            if (SUCCEEDED(device->d3d->QueryInterface(IID_PPV_ARGS(&fc4Queue)))) {
+                const UINT64 count = fc4Queue->GetNumStoredMessages();
+                for (UINT64 i = (count > 8) ? (count - 8) : 0; i < count; i++) {
+                    SIZE_T size = 0;
+                    fc4Queue->GetMessage(i, nullptr, &size);
+                    std::vector<char> bytes(size);
+                    D3D12_MESSAGE *message = reinterpret_cast<D3D12_MESSAGE *>(bytes.data());
+                    if (SUCCEEDED(fc4Queue->GetMessage(i, message, &size))) {
+                        fprintf(stderr, "[plume]   %.*s\n", int(message->DescriptionByteLength), message->pDescription);
+                    }
+                }
+                fc4Queue->ClearStoredMessages();
+                fc4Queue->Release();
+            }
+            fflush(stderr);
+        }
     }
 
     D3D12GraphicsPipeline::~D3D12GraphicsPipeline() {
@@ -4187,6 +4207,16 @@ namespace plume {
         // Create DXGI Factory.
         UINT dxgiFactoryFlags = 0;
 
+        // fc4-nx (2026-11-10): FC4_D3D12_DEBUG=1 turns the debug layer on in a release build (pipeline failures then
+        // print its messages).
+        const char *fc4Debug = getenv("FC4_D3D12_DEBUG");
+        if (fc4Debug != nullptr && fc4Debug[0] == '1') {
+            ID3D12Debug *fc4DebugController;
+            if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&fc4DebugController)))) {
+                fc4DebugController->EnableDebugLayer();
+                fc4DebugController->Release();
+            }
+        }
 #   ifdef D3D12_DEBUG_LAYER_ENABLED
         ID3D12Debug1 *debugController;
         if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {

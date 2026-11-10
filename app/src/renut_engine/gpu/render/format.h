@@ -131,6 +131,8 @@ enum class GpuColorFormat : u32 {
   Fmt16_16_16_16 = 5,
   Fmt16_16_Float = 6,
   Fmt16_16_16_16_Float = 7,
+  Fmt2_10_10_10_As10_10_10_10 = 10,     // fc4-nx (2026-11-10)
+  Fmt2_10_10_10_FloatAs16_16_16_16 = 12, // fc4-nx (2026-11-10)
   Fmt32_Float = 14,
   Fmt32_32_Float = 15,
 };

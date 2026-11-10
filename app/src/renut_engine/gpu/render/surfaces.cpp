@@ -31,6 +31,11 @@
 #include <rex/ui/switch_saltynx.h>  // banjo-nx (2026-10-21): the console's mode, Reverse-NX obeyed
 #endif
 
+REXCVAR_DEFINE_BOOL(banjo_renut_resolve_extents, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-10): a resolve whose rect reaches past its target's edge (up to twice its size) "
+                    "makes every target of that view's shape that large from its next use. Far Cry 4 tiles its "
+                    "G-buffer (two tiles in 880-wide surfaces) and resolves the second tile at 864-1280, which an "
+                    "880-wide target never drew: a third of the picture garbage. false: targets keep the surface size");
 REXCVAR_DEFINE_BOOL(banjo_renut_view_float16, true, "Banjo/Renut",
                     "fc4-nx (2026-11-10): once an EDRAM colour view has been bound as 16_16_16_16_FLOAT, every surface "
                     "over it in a 16_16_16_16 format takes the float target (the console's EDRAM is one memory; Far "
@@ -147,6 +152,12 @@ std::unordered_map<uint64_t, uint8_t> g_depth_view_formats;
 // R16G16B16A16_FLOAT.
 std::unordered_map<uint64_t, uint8_t> g_float16_views;
 // SetTilingExtentLocked; 0 x 0 when not tiling.
+// fc4-nx (2026-11-10, banjo_renut_resolve_extents): the guest width/height that resolves reached past their targets'
+// edges, by view shape (TargetKey's pitch, samples and scale: every target of a tiled pass, colour and depth, shares it).
+// FC4 tiles its G-buffer (two tiles, 0-864 and 864-1280, in 880-pitch surfaces) through D3D tiling Renut does not see;
+// it draws each pass once at screen coordinates, so the targets must reach the screen's edge.
+std::unordered_map<uint64_t, std::pair<uint32_t, uint32_t>> g_resolve_extents;
+constexpr uint64_t kViewShapeMask = 0xEFFFF000ull;
 uint32_t g_tiling_width = 0;
 uint32_t g_tiling_height = 0;
 
@@ -614,6 +625,45 @@ void NoteGpuFrameForDynamicResolution(double gpu_ms) {
             heights[next], was, heights[step], DynamicGpuMs());
 }
 
+void NoteResolveExtentLocked(const HostSurface *surface, int32_t x1, int32_t y1, uint32_t x2, uint32_t y2) {
+  if (!surface || !REXCVAR_GET(banjo_renut_resolve_extents))
+    return;
+  // A later tile's resolve: the rect starts inside the target and runs past its edge (FC4's second tile: 864-1280 of an
+  // 880-wide target). A whole-screen rect from 0 (FC4's depth resolves of smaller targets) is not one.
+  const bool past_x = x2 > surface->width && x1 > 0 && uint32_t(x1) < surface->width;
+  const bool past_y = y2 > surface->height && y1 > 0 && uint32_t(y1) < surface->height;
+  if (!past_x && !past_y)
+    return;
+  if (!past_x)
+    x2 = surface->width;
+  if (!past_y)
+    y2 = surface->height;
+  // Past the Xenos limits, or more than twice the target: a bad rect, not a tiled pass.
+  if (x2 > 2048 || y2 > 2048 || x2 > 2 * surface->width || y2 > 2 * surface->height)
+    return;
+  uint64_t own = 0;
+  for (const auto &[key, target] : g_targets) {
+    if (target.get() == surface) {
+      own = key;
+      break;
+    }
+  }
+  if (!own)
+    return;
+  auto &e = g_resolve_extents[own & kViewShapeMask];
+  const uint32_t width = std::max({e.first, x2, surface->width});
+  const uint32_t height = std::max({e.second, y2, surface->height});
+  if (width == e.first && height == e.second)
+    return;
+  e = {width, height};
+  ++g_surface_epoch;
+  static uint32_t logged = 0;
+  if (logged++ < 8)
+    RGPU_INFO("[renut] a resolve reached {}x{} past target {:08X} ({}x{}, view {:X}): its view's targets grow to it "
+              "(banjo_renut_resolve_extents)", x2, y2, surface->guest_va, surface->width, surface->height,
+              own & kViewShapeMask);
+}
+
 void SetTilingExtentLocked(uint32_t width, uint32_t height) {
   if (g_tiling_width != width || g_tiling_height != height)
     ++g_surface_epoch;
@@ -665,6 +715,37 @@ void ColorAliasesLocked(const HostSurface *surface, std::vector<HostSurface *> &
         (key & kViewMask) == (own & kViewMask))
       out.push_back(target.get());
   }
+}
+
+HostSurface *DownsampleSourceLocked(const HostSurface *surface) {
+  if (!surface || surface->depth || surface->samples != plume::RenderSampleCount::COUNT_4)
+    return nullptr;
+  uint64_t own = 0;
+  for (const auto &[key, target] : g_targets) {
+    if (target.get() == surface) {
+      own = key;
+      break;
+    }
+  }
+  if (!own)
+    return nullptr;
+  // TargetKey: EDRAM base 0-11, pitch 12-25, samples 26-27, depth 28, scale 29-31, host format above.
+  const uint64_t pitch = (own >> 12) & 0x3FFF;
+  const uint64_t want = (own & 0xFFF) | (pitch * 2) << 12 | (own & (7ull << 29)) | (own & ~0xFFFFFFFFull);
+  auto it = g_targets.find(want);
+  if (it == g_targets.end() || !it->second || !it->second->texture || !it->second->writes) {
+    static uint32_t logged = 0;
+    if (logged++ < 2) {
+      std::string others;
+      for (const auto &[key, target] : g_targets)
+        if (target && !target->depth && (key & 0xFFF) == (own & 0xFFF) && key != own)
+          others += fmt::format(" {:X} ({}x{}, {} writes)", key, target->width, target->height, target->writes);
+      RGPU_INFO("[renut] 4x target {:X} ({}x{}): no 1x target {:X} drawn over its EDRAM; others there:{}", own,
+                surface->width, surface->height, want, others.empty() ? " none" : others);
+    }
+    return nullptr;
+  }
+  return it->second.get();
 }
 
 HostSurface *GetHostSurfaceSlow(u32 surface_va, const d3d::SurfaceDesc *desc);
@@ -844,6 +925,15 @@ HostSurface *GetHostSurfaceSlow(u32 surface_va, const d3d::SurfaceDesc *desc) {
     }
   }
   const uint64_t key = TargetKey(*desc, depth, format, scale);
+  if (!depth && (u32(desc->ColorInfo) >> 20) & 0x3F) {
+    // fc4-nx (2026-11-10, diagnostic): RB_COLOR_INFO's exponent bias (bits 20-25: the console writes the pixel
+    // shader's colour times 2^bias); Renut does not apply it.
+    static std::unordered_map<uint64_t, uint32_t> seen;
+    if (seen.size() < 24 && seen.try_emplace(uint64_t(surface_va) << 32 | u32(desc->ColorInfo), 0).second)
+      RGPU_INFO("[renut] colour surface {:08X} ({}x{}, format {}, host {}) has exponent bias {}", surface_va,
+                d3d::SurfaceWidth(desc->Size), d3d::SurfaceHeight(desc->Size), (u32(desc->ColorInfo) >> 16) & 0xF,
+                u32(format), int32_t(u32(desc->ColorInfo) << 6) >> 26);
+  }
   auto [bound, first_use] = g_surface_keys.try_emplace(surface_va, key);
   if (first_use) {
     ++g_target_users[key];
@@ -862,12 +952,21 @@ HostSurface *GetHostSurfaceSlow(u32 surface_va, const d3d::SurfaceDesc *desc) {
   // tiling (SetTilingExtentLocked).
   uint32_t min_width = std::max(g_tiling_width, d3d::SurfaceWidth(desc->Size));
   uint32_t min_height = std::max(g_tiling_height, d3d::SurfaceHeight(desc->Size));
+  bool tiled = false;
+  if (!g_resolve_extents.empty()) {
+    if (auto e = g_resolve_extents.find(key & kViewShapeMask); e != g_resolve_extents.end()) {
+      min_width = std::max(min_width, e->second.first);
+      min_height = std::max(min_height, e->second.second);
+      tiled = true;
+    }
+  }
   if (slot && slot->texture) {
     // The surface bound now: its guest size (Targets::guest_width) and D3D
     // format (D24S8 or D24FS8 for a depth resolve).
     slot->size_word = desc->Size;
     slot->info_word = desc->SurfaceInfo;
     slot->format_word = desc->Format;
+    slot->tiled = tiled;
     if (slot->width >= min_width && slot->height >= min_height && slot->scale == scale)
       return slot.get();
     // A larger surface over the view, or a larger tiling: grow it, keeping
@@ -881,6 +980,7 @@ HostSurface *GetHostSurfaceSlow(u32 surface_va, const d3d::SurfaceDesc *desc) {
     slot->guest_va = surface_va;
   }
   ++g_surface_epoch;
+  slot->tiled = tiled;
   if (!BuildTarget(*slot, *desc, min_width, min_height, scale))
     return nullptr;
   // No defined content yet; D3D12 wants a new target discarded (or cleared)

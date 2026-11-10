@@ -8,5 +8,10 @@
 float4 main(float4 position : SV_Position) : SV_Target0
 {
     const int2 texel = int2(position.xy) + int2(g_Push.translate);
-    return g_Textures[NonUniformResourceIndex(g_Push.textureIndex)].Load(int3(texel, 0));
+    float4 color = g_Textures[NonUniformResourceIndex(g_Push.textureIndex)].Load(int3(texel, 0));
+    // fc4-nx (2026-11-10): param1 > 0, a resolve into a fixed-point texture: the console writes the value times its
+    // exponent bias (param1 = 2^bias), clamped to 0..1 (unsigned).
+    if (g_Push.param1 > 0.0)
+        color = saturate(color * g_Push.param1);
+    return color;
 }

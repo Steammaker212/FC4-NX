@@ -17,6 +17,10 @@ struct Vertex
     float4 normal[3] : NORMAL0;
     float4 tangent : TANGENT0;
     float4 binormal : BINORMAL0;
+    // fc4-nx (2026-11-10): the fog interpolator every Renut vertex and pixel shader has (XenosRecomp INTERPOLATORS,
+    // after BINORMAL0): without it D3D12 refused every pipeline with this shader and deko3d read the next ones a
+    // location off.
+    float4 fog : FOG0;
     float2 pointCoord : POINTCOORD;
     float pointSize : POINTSIZE;
 };

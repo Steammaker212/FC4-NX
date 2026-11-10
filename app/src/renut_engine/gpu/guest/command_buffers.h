@@ -53,6 +53,9 @@ void RecordResolve(u32 device_va, u32 flags, const ClearRect *source_rect, u32 d
 
 // D3DDevice_RunCommandBuffer on a recording device: records the run.
 void RecordRun(u32 device_va, u32 command_buffer_va);
+// fc4-nx (2026-11-10): D3D BeginTiling (the tiles and their extent) / EndTiling (none, 0x0) while the device records a
+// buffer: at replay the targets bound between them cover every tile (SetTilingExtentLocked, SetTilesLocked).
+void RecordTiling(u32 device_va, const ClearRect *tiles, u32 count, u32 width, u32 height);
 // banjo-nx (2026-10-26, banjo_renut_diag_fast_census): replayed recordings against the frame before's; empty when none.
 // (2026-10-29: its own name; it shared render/draw.h's, one definition of the two was linked.)
 std::string ReplayRepeatCensusReport();

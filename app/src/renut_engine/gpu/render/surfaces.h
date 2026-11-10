@@ -63,6 +63,9 @@ struct HostSurface {
   uint32_t height = 0;
   RenderScale scale;
   bool depth = false;
+  // fc4-nx (2026-11-10, banjo_renut_resolve_extents): made larger than its surfaces for a tiled pass (one target for
+  // every tile): draws in a later tile's window offset are not drawn again (ComputeViewportSlow).
+  bool tiled = false;
   plume::RenderFormat format = plume::RenderFormat::UNKNOWN;
   plume::RenderSampleCounts samples = plume::RenderSampleCount::COUNT_1;
 
@@ -162,6 +165,11 @@ HostSurface *FindHostSurfaceLocked(u32 surface_va);
 // memory, so what a clear writes through one is what the others then hold.
 void ColorAliasesLocked(const HostSurface *surface, std::vector<HostSurface *> &out);
 
+// fc4-nx (2026-11-10): for a 4x-MSAA colour target, the 1x target of the same host format and scale drawn over the
+// same EDRAM base at twice its pitch (FC4 resolves its 1280x704 HDR scene through a 640x352 4x view: the console's
+// free 2x2 downsample). Null if there is none, or nothing drew it.
+HostSurface *DownsampleSourceLocked(const HostSurface *surface);
+
 // Predicated tiling (D3DDevice_BeginTiling .. EndTiling): the game draws the
 // frame into surfaces the size of one EDRAM tile, and the GPU replays the
 // draws once per tile with the tile's screen offset, resolving each tile into
@@ -171,6 +179,9 @@ void ColorAliasesLocked(const HostSurface *surface, std::vector<HostSurface *> &
 // 'width' x 'height' is the bottom-right corner of the tile rects; 0 x 0 ends
 // tiling.
 void SetTilingExtentLocked(uint32_t width, uint32_t height);
+// fc4-nx (2026-11-10, banjo_renut_resolve_extents): a resolve of 'surface' reaching guest x2/y2 past its edge: every
+// target of its view's shape is made that large from its next use (a tiled pass drawn once at screen coordinates).
+void NoteResolveExtentLocked(const HostSurface *surface, int32_t x1, int32_t y1, uint32_t x2, uint32_t y2);
 
 // The surface no longer uses its target (guest D3DResource_Destroy); the
 // target is retired when no surface over its view remains.

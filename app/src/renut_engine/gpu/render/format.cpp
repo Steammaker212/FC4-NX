@@ -16,7 +16,9 @@ plume::RenderFormat ColorTargetFormat(GpuColorFormat format) {
   case GpuColorFormat::Fmt8_8_8_8_Gamma:
     return plume::RenderFormat::R8G8B8A8_UNORM;
   case GpuColorFormat::Fmt2_10_10_10:
+  case GpuColorFormat::Fmt2_10_10_10_As10_10_10_10:  // fc4-nx (2026-11-10): was RGBA8 (the default)
     return plume::RenderFormat::R16G16B16A16_UNORM;
+  case GpuColorFormat::Fmt2_10_10_10_FloatAs16_16_16_16:  // fc4-nx (2026-11-10): was RGBA8, clamping HDR
   case GpuColorFormat::Fmt2_10_10_10_Float:
   case GpuColorFormat::Fmt16_16_16_16_Float:
     return plume::RenderFormat::R16G16B16A16_FLOAT;

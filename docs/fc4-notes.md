@@ -563,3 +563,42 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
 - NSP forwarder: tools/switch/make_fc4_nsp.sh (nx-hbloader with its default NRO set to sdmc:/switch/fc4-nx/fc4-nx.nro,
   back to HOME when the game exits: tools/switch/forwarder; hacbrewpack 3.05 built from source, the rlaphoenix mirror
   of The-4n's, in ../nsp_tools; prod.keys filtered to 32/64-digit keys into out/nsp). Title ID 01FC4F00C4000000.
+
+## In-engine rendering: black on PC, garbage on the console (2026-11-10, PC runs pcplay2-6)
+- **Rectangle lists and point sprites:** every Renut vertex and pixel shader carries a FOG0 interpolator (XenosRecomp
+  INTERPOLATORS, added for Katamari), but rectangle_list_gs / point_sprite_gs did not: D3D12 refused every pipeline
+  with either (E_INVALIDARG, "Semantic 'POINTCOORD' is defined for mismatched hardware registers"; 32+ a run, all
+  full-screen passes: the black picture), and on deko3d the geometry shaders read and wrote POINTCOORD/POINTSIZE one
+  location off. Both now declare `float4 fog : FOG0` after BINORMAL0. `FC4_D3D12_DEBUG=1` turns the D3D12 debug layer
+  on in a release build; a failed pipeline prints its HRESULT and the layer's messages to stderr (plume_d3d12.cpp).
+- **Tiled G-buffer:** FC4 draws its G-buffer through D3D tiling (two tiles, 0-864 and 864-1280, in 880-pitch
+  surfaces) and resolves the second tile at (864,0)-(1280,704). Renut's BeginTiling/EndTiling hooks (83F27938 /
+  83F27ED8, raw hooks in d3d/hooks/draw.cpp) are never called in this game (no recompiled caller; the D3D runtime's own
+  per-tile resolves still arrive), so the 880-wide targets clipped every draw past x 880: the right third of the
+  picture was never drawn (console: garbage there). banjo_renut_resolve_extents (surfaces.cpp): a resolve whose rect
+  starts inside its target and runs past the edge grows every target of that view shape (pitch, samples, scale) to it.
+- **The 4x view:** the HDR scene's 640x352 4x-MSAA view (nothing draws it) is now the 2x2 box of the 1x float target
+  over the same EDRAM (DownsampleSourceLocked + DownsampleResolveCopy, texture_mip_ps).
+- **Resolves into fixed-point textures** (resolve trace: `dest fetch format`): the console writes unsigned data,
+  value x 2^bias clamped to 0..1. FC4: the HDR scene -> k_2_10_10_10_AS_16_16_16_16 at 2^-5 (sampled at 2^+2/+3) and
+  the 4x view -> k_16_16_16_16 at 2^+11, sampled at 2^-14 (a bright-pass mask, ~1 wherever the scene is lit). Renut
+  copied the float values and applied the bias at the bind: the 4x copy came out ~2000x too bright and the picture
+  white. banjo_renut_resolve_fixed_clamp (draw.cpp): such a resolve from a float/signed target, or with a bias, is
+  drawn (resolve_copy_ps / texture_mip_ps, param1 = 2^bias, saturate) and its binds add no bias.
+- Xenos 16_16 / 16_16_16_16 fixed render targets hold -32..32 (Xenia snorm16_render_target_full_range); Renut's SNORM
+  targets hold -1..1. Xenia's resolve: EDRAM value (bits x 32/32767) x 2^bias, packed unorm-saturated into a fixed
+  destination; FC4's 64x64 16_16 targets -> k_16_16 at 2^+11, sampled at 2^-16: matched by the clamp copy.
+- Colour formats 10 (2_10_10_10_AS_10_10_10_10) and 12 (2_10_10_10_FLOAT_AS_16_16_16_16) fell to RGBA8 in
+  ColorTargetFormat; now RGBA16 unorm / RGBA16 float.
+- **PC (D3D12) gameplay still white, the Switch should not be:** FC4 draws its 3D passes with a reversed viewport depth
+  range (VportZScale -1, VportZOffset 1: MinDepth 1 > MaxDepth 0; reverse-Z with clear 0 and GEQUAL; resolve trace
+  `z scale -1 offset 1`). D3D12 never allowed MinDepth > MaxDepth (Xenia swaps them and negates NDC z in its vertex
+  shaders, draw_util GetHostViewportInfo); here the G-buffer resolves come out as their clear colour (1,1,1,1) and the
+  lit scene saturates. deko3d (plume_deko3d_commands.cpp setViewports) passes near 1 / far 0 to the GPU as they are.
+  The D3D12 fix needs a z flip in the vertex shaders (XenosRecomp epilogue + a shared constant: a shader library and
+  GLSL package rebuild). The palace/hood scene renders on PC.
+- Diagnostics: the resolve trace now gives each resolve's destination fetch format, sign and exponent adjust, each clear's
+  values, and the first three draws' depth/stencil/colour/clip/viewport state after every change of targets; a colour
+  surface with an RB_COLOR_INFO exponent bias is logged (none of FC4's real targets has one).
+- banjo_renut_tile_replays: in a target grown for tiling, draws with a later tile's window offset are not drawn (FC4's
+  passes all run with window offset 0: it does not trigger in FC4).

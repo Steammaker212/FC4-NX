@@ -423,6 +423,56 @@ void D3DDevice_BeginTiling_hook(u32 device, u32 /*flags*/, u32 count, u32 rects_
   native::ResetAllState(d);
 }
 
+// fc4-nx (2026-11-10): Far Cry 4's own BeginTiling / EndTiling run (its device layout is not N&B's, which the two
+// hooks above write), and Renut is only told the tiles: the surfaces bound in between get targets covering every tile
+// (SetTilingExtentLocked), drawn once, and D3D's own per-tile resolves (through the Resolve hook) read each tile's rect
+// from them. Without it FC4's G-buffer (two tiles, 0-864 and 864-1280 of 1280x704) was an 880-wide target and the second
+// tile's resolve read 16 columns of it: the right third of the picture was never written.
+void NoteTilingBegin(u32 device, u32 count, u32 rects_va) {
+  static uint32_t calls = 0;
+  if (calls++ < 2)
+    RGPU_INFO("[renut] BeginTiling hook: device {:08X}, count {}, rects {:08X}", device, count, rects_va);
+  if (count == 0 || count > 16)
+    return;
+  std::vector<ClearRect> tiles;
+  u32 width = 0, height = 0;
+  for (u32 i = 0; i < count; ++i) {
+    ClearRect rect;
+    if (!ReadRect(rects_va + i * 16, rect))
+      break;
+    tiles.push_back(rect);
+    width = std::max(width, u32(rect.x2));
+    height = std::max(height, u32(rect.y2));
+  }
+  if (tiles.empty())
+    return;
+  FlushDeferredVertices(device);
+  const bool recording = IsRecordingCommandBuffer(device);
+  static uint32_t logged = 0;
+  if (logged++ < 4)
+    RGPU_INFO("[renut] BeginTiling: {} tiles, extent {}x{} (first {},{}-{},{}){}", tiles.size(), width, height,
+              tiles[0].x1, tiles[0].y1, tiles[0].x2, tiles[0].y2, recording ? ", into a command buffer" : "");
+  if (recording) {
+    RecordTiling(device, tiles.data(), u32(tiles.size()), width, height);
+    return;
+  }
+  render_thread::Queue([tiles, width, height] {
+    SetTilingExtentLocked(width, height);
+    SetTilesLocked(tiles.data(), u32(tiles.size()));
+  });
+}
+
+void NoteTilingEnd(u32 device) {
+  if (IsRecordingCommandBuffer(device)) {
+    RecordTiling(device, nullptr, 0, 0, 0);
+    return;
+  }
+  render_thread::Queue([] {
+    SetTilingExtentLocked(0, 0);
+    SetTilesLocked(nullptr, 0);
+  });
+}
+
 // HRESULT D3DDevice_EndTiling(D3DDevice*, DWORD ResolveFlags,
 //     const D3DRECT *pResolveRects, D3DBaseTexture *pDestTexture,
 //     const D3DVECTOR4 *pClearColor, float ClearZ, DWORD ClearStencil,
@@ -637,4 +687,16 @@ BANJO_RENUT_HOOK_RAW(sub_83F2D358) {  // fc4-nx: SA2 sub_825656F8
   QueueHostResolve(device, flags, has_rect ? &rect : nullptr, dest_texture, dest_x, dest_y, dest_level, dest_slice,
                    color_va, float(ctx.f1.f64), clear_stencil);
   __imp__sub_83F2D358(ctx, base);  // fc4-nx: was SA2
+}
+
+// fc4-nx (2026-11-10): D3DDevice_BeginTiling 83F27938 (r3 device, r4 flags, r5 count, r6 tile rects) and EndTiling
+// 83F27ED8 run as they are; Renut is told the tiles around them (NoteTilingBegin / NoteTilingEnd).
+BANJO_RENUT_HOOK_RAW(sub_83F27938) {
+  NoteTilingBegin(ctx.r3.u32, ctx.r5.u32, ctx.r6.u32);
+  __imp__sub_83F27938(ctx, base);
+}
+BANJO_RENUT_HOOK_RAW(sub_83F27ED8) {
+  const u32 device = ctx.r3.u32;
+  __imp__sub_83F27ED8(ctx, base);
+  NoteTilingEnd(device);
 }

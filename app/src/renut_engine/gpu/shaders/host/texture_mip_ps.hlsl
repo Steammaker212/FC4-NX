@@ -20,5 +20,8 @@ float4 main(float4 position : SV_Position) : SV_Target0
         for (int x = 0; x < box; ++x)
             sum += source.Load(int3(min(origin + int2(x, y), last), 0));
     }
+    // fc4-nx (2026-11-10): param1 > 0, a downsampling resolve into a fixed-point texture (resolve_copy_ps).
+    if (g_Push.param1 > 0.0)
+        return saturate(sum / float(box * box) * g_Push.param1);
     return sum / float(box * box);
 }
