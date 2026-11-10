@@ -437,3 +437,17 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
     visible run). Next: the PC's pipeline_list.bin into a prebuilt DKSH cache (tools/deko3d_variant_cache.py).
   - Katamari leftovers to clean up: banjo_pool_lock hooks sub_82333388/sub_823333F0 by Katamari's addresses (only a
     mutex around the original), and 17 unused banjo_cpu_native_sub_* keys in katamari_switch_defaults.toml.
+- **Ryubing's limits (2026-11-10, the user's run `mine2`):** the KYRAT load ran on, then Ryubing died with
+  "OutOfMemoryException: Failed to allocate in new Cache Region!": its JIT cache grew in 256 MB regions to 2.25 GB and
+  stopped. The NRO has 105 MB of AArch64 code (largest function 166 KB, so it is the total, not one function). With
+  the unwinder's GCSPR_EL0 and the refused pseudo-handle, the third emulator-only limit; a console runs the code
+  natively. `input_script` replaces player 1 (the user's controller did nothing): out/emu_user.toml has none.
+- Prebuilt DKSH cache: `tools/deko3d_variant_cache.py --list app/out/pc_renut/pipeline_list.bin --generic --glsl
+  out/deko3d_shaders/glsl --out out/deko3d_pkg_noopt/deko3d_shaders.bin` (6,162 variants, 28 MB, none failed; 562
+  stages without GLSL); tools/fc4_run_ryujinx.ps1 copies out/deko3d_pkg/deko3d_shaders.bin beside the NRO. It must
+  come from the same GLSL as the package (now the unoptimised one, testing whether deko3d_glsl_opt.py's passes cause
+  the GPU hang).
+- `banjo_deko3d_bind_trace` (plume: Deko3DSetBindTrace): the last 256 pipeline binds' shader names, logged when a
+  fence does not signal in 2 s. Hang suspects: vs_26DE92239ADAE756 / vs_F33E59F6A6DE49DD divide by repeated
+  subtraction (`for (uint x = r; x >= d; ) x -= d;`, d = max(v[65].y, 1) + 1: a loop for ever only if the
+  tessellation factor is 0xFFFFFFFF).

@@ -7,7 +7,10 @@
 #include <switch.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
+#include <string>
+#include <vector>
 #include <cinttypes>
 #include <cmath>
 #include <cstdarg>
@@ -21,6 +24,35 @@ namespace plume {
 
     void deko3dLog(const char *fmt, ...); // plume_deko3d.cpp
 #define logf deko3dLog
+
+    // fc4-nx (2026-11-10, Deko3DSetBindTrace): the last kBindTraceSize pipeline binds' vertex and pixel shader names.
+    static constexpr uint32_t kBindTraceSize = 256;
+    static bool g_bindTrace = false;
+    static std::atomic<uint32_t> g_bindTraceNext{0};
+    static char g_bindTraceRing[kBindTraceSize][2][24];
+    void Deko3DSetBindTrace(bool on) { g_bindTrace = on; }
+
+    // The ring's distinct shader pairs, newest first, a few to a line (the hung submission is among the last recorded).
+    static void logBindTrace() {
+        const uint32_t next = g_bindTraceNext.load(std::memory_order_relaxed);
+        const uint32_t count = std::min(next, kBindTraceSize);
+        std::vector<std::string> seen;
+        std::string line;
+        for (uint32_t i = 1; i <= count; i++) {
+            const char(*e)[24] = g_bindTraceRing[(next - i) % kBindTraceSize];
+            std::string pair = std::string(e[0]) + "+" + std::string(e[1][0] ? e[1] : "-");
+            if (std::find(seen.begin(), seen.end(), pair) != seen.end())
+                continue;
+            seen.push_back(pair);
+            line += (line.empty() ? "" : " ") + pair;
+            if (seen.size() % 4 == 0) {
+                logf("bind trace (newest first, %u binds): %s", count, line.c_str());
+                line.clear();
+            }
+        }
+        if (!line.empty())
+            logf("bind trace (newest first, %u binds): %s", count, line.c_str());
+    }
 
     static constexpr uint32_t alignUp(uint32_t v, uint32_t a) { return (v + a - 1) / a * a; }
 
@@ -546,6 +578,10 @@ namespace plume {
         // an exclusive read-modify-write loop: the A57 has no LSE atomics.
         auto bump = [](std::atomic<uint64_t> &c) { c.store(c.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed); };
         bump(GetDeko3DStats().pipelineBinds);
+        if (g_bindTrace) {
+            const uint32_t at = g_bindTraceNext.fetch_add(1, std::memory_order_relaxed) % kBindTraceSize;
+            std::memcpy(g_bindTraceRing[at], p->traceNames, sizeof(p->traceNames));
+        }
         // Shaders: rebound when any stage differs (absent stages are disabled by the bind).
         // banjo-nx (2026-10-28, per-draw night): only the stages that differ (deko3d binds each stage on its own: its
         // program, its compiler constant buffer, the fragment stage's state; a stage in the mask without a shader is
@@ -1439,6 +1475,8 @@ namespace plume {
             if (failed || (waited & (waited - 1)) == 0)
                 logf("a fence has not signalled after %d s (result %d)%s", waited * 2, int(r),
                      failed ? "; the queue is in an error state: not waited for" : "");
+            if (waited == 1 && g_bindTrace)
+                logBindTrace();
             if (failed)
                 break;
         }

@@ -287,6 +287,9 @@ namespace plume {
         // absent), so a bind does not ask deko3d, and a hash of each group of the fixed-function state, so a bind
         // after a pipeline of other state sends only the groups that differ (kStateGroups, Deko3DCommandList).
         const DkShader *stageShaders[3] = {};
+        // fc4-nx (2026-11-10, Deko3DSetBindTrace): the vertex and pixel shaders' names (vs_/ps_<hash>), copied so the
+        // bind trace never reads a shader object that is gone.
+        char traceNames[2][24] = {};
         uint64_t stateHash = 0; // equal hashes: the same fixed-function state (binds skipped)
         // UBO / SSBO slots each stage reads (vertex, geometry, fragment).
         uint32_t uboMask[3] = {}, ssboMask[3] = {};
@@ -789,6 +792,9 @@ namespace plume {
     // banjo-nx (2026-10-28, the console's OOM): called when a memory block's storage cannot be had from the heap, before
     // asking again (any thread; it must not take the application's renderer lock): the application's spares go back.
     void Deko3DSetMemoryPressureCallback(void (*callback)());
+    // fc4-nx (2026-11-10): the last pipeline binds' shader names in a ring, logged when a fence does not signal in 2 s
+    // (which draw a GPU hang is in). Off by default: a copy of 48 bytes a bind.
+    void Deko3DSetBindTrace(bool on);
 
     // banjo-nx (2026-10-28, h10): GPU memory blocks from a region of their own at the heap's top (plume_deko3d.cpp,
     // "The GPU region"); on by default, set before the device is made. Its figures for the memory report.

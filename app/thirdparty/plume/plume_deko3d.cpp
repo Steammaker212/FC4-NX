@@ -2286,6 +2286,11 @@ namespace plume {
                                          static_cast<const Deko3DShader *>(desc.geometryShader),
                                          static_cast<const Deko3DShader *>(desc.pixelShader)};
         static const DkStage dkStages[3] = {DkStage_Vertex, DkStage_Geometry, DkStage_Fragment};
+        for (int t = 0; t < 2; t++) {
+            const Deko3DShader *s = stages[t ? 2 : 0];
+            if (s)
+                std::snprintf(p->traceNames[t], sizeof(p->traceNames[t]), "%s", s->name.c_str());
+        }
         bool ok = stages[0] != nullptr;
         // banjo-nx (2026-10-18, Deko3DOptions::vsOutputs): the vertex shader's constant 905, the locations the pixel
         // shader reads of the ones it writes, when that is not all of them (tools/deko3d_variant_cache.py's stage_spec

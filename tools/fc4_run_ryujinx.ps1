@@ -23,6 +23,9 @@ Copy-Item $built $nro -Force
 # The deko3d GLSL package (tools: deko3d_glsl_opt.py + deko3d_shader_package.py into out/deko3d_pkg): game data, read beside the NRO.
 $pkg = Join-Path $root "out/deko3d_pkg/deko3d_glsl.bin"
 if (Test-Path $pkg) { Copy-Item $pkg (Join-Path $sd "deko3d_glsl.bin") -Force }
+# The prebuilt DKSH cache (tools/deko3d_variant_cache.py, from the same GLSL as the package): no shader compiles in the game.
+$dksh = Join-Path $root "out/deko3d_pkg/deko3d_shaders.bin"
+if (Test-Path $dksh) { Copy-Item $dksh (Join-Path $sd "deko3d_shaders.bin") -Force }
 # Ryubing gives a command-line NRO no argv: the NRO then uses REX_SWITCH_FALLBACK_EXE, /switch/fc4-nx/fc4-nx.nro.
 # Its log (log_file in the toml) is copied when it is on the SD root.
 $sdRoot = Join-Path $data "sdcard"

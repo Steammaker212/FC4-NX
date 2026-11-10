@@ -31,6 +31,10 @@ extern const uint8_t g_deko3dGlslPackage[] __attribute__((weak));
 extern const size_t g_deko3dGlslPackageSize __attribute__((weak));
 
 REXCVAR_DECLARE(std::string, log_level);  // sdk/src/core/logging.cpp
+REXCVAR_DEFINE_BOOL(banjo_deko3d_bind_trace, false, "Banjo/Renut",
+                    "fc4-nx (2026-11-10): the last 256 pipeline binds' shader names, logged when a GPU fence does not signal "
+                    "in 2 s (which shaders a GPU hang is in). A copy of 48 bytes a bind")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace banjo::renut_gpu::deko3d {
 
@@ -463,6 +467,7 @@ void InstallShaderCache() {
   plume::Deko3DSetOptions(options);
   // banjo-nx (2026-10-28, the console's OOM): a block that finds no room in the heap gets the spare command buffers'.
   plume::Deko3DSetMemoryPressureCallback(+[] { ::renut::gpu::ReleaseSpareBuffersNow(); });
+  plume::Deko3DSetBindTrace(REXCVAR_GET(banjo_deko3d_bind_trace));  // fc4-nx (2026-11-10)
   plume::Deko3DSetGpuRegion(Deko3DGpuRegionOn());  // banjo-nx (2026-10-28, h10)
   plume::Deko3DSetVertexBufferDedupe(Deko3DVtxDedupeOn());  // banjo-nx (2026-10-26, Unleashed-style step 2)
   plume::Deko3DSetTextureSkip(Deko3DTextureSkipOn());       // banjo-nx (2026-10-27, render thread night)
