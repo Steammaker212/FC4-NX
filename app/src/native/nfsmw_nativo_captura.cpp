@@ -25,6 +25,12 @@
 #include <thread>
 #include <vector>
 
+#if defined(__SWITCH__)
+#include <malloc.h>
+#include <unistd.h>
+extern "C" char* fake_heap_end;  // libnx: the heap's end (sbrk grows towards it)
+#endif
+
 REXCVAR_DEFINE_INT32(nfsmw_captura_cada_s, 0, "NFSMW",
                      "Guardar una captura PNG de la imagen del juego cada N segundos en capturas/ "
                      "junto al ejecutable (0 = nunca; solo para pruebas)")
@@ -148,6 +154,15 @@ std::vector<uint8_t> CodificarPng(const rex::ui::RawImage& imagen) {
   return png;
 }
 
+#if defined(__SWITCH__)
+// Free bytes in newlib's heap: free chunks plus what sbrk can still give (as plume_deko3d's memoryFigures counts them).
+uint64_t HeapRoomBytes() {
+  const struct mallinfo mi = mallinfo();
+  char* brk = static_cast<char*>(sbrk(0));
+  return uint64_t(mi.fordblks) + (fake_heap_end > brk ? uint64_t(fake_heap_end - brk) : 0);
+}
+#endif
+
 void Bucle(Capturador capturar, int cada_s, int maximo) {
   const std::filesystem::path carpeta = rex::filesystem::GetExecutableFolder() / "capturas";
   const auto inicio = std::chrono::steady_clock::now();
@@ -161,6 +176,14 @@ void Bucle(Capturador capturar, int cada_s, int maximo) {
     const int rafaga = REXCVAR_GET(banjo_captura_rafaga);
     for (int k = 0; k < rafaga; ++k) {
     if (k) std::this_thread::sleep_for(std::chrono::milliseconds(REXCVAR_GET(banjo_captura_rafaga_ms)));
+#if defined(__SWITCH__)
+    // fc4-nx (2026-11-10): no capture with the heap nearly gone. The frame and the PNG take ~10 MB; their std::bad_alloc
+    // ended the process at New Game (an uncaught throw on this thread, and in Ryubing any throw is fatal).
+    if (HeapRoomBytes() < (96ull << 20)) {
+      REXLOG_WARN("[captura] {}: skipped, {} MB of heap left", n, HeapRoomBytes() >> 20);
+      continue;
+    }
+#endif
     rex::ui::RawImage imagen;
     if (!capturar(imagen) || !imagen.width || !imagen.height) {
       REXLOG_WARN("[captura] {}: no hay imagen del juego que capturar", n);

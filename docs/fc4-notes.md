@@ -422,3 +422,18 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
 - Memory: docked at 1080 (render targets 1.5x) the heap ran out (`emu16`: 94 MB free, std::bad_alloc in the capture
   thread). `banjo_renut_render_height_docked = 720` held it at 239 MB free; menus still draw at the HUD's 1.5x
   (surfaces.cpp: display scale until a 3D composite is seen). GPU region peak 1.85 GB.
+- **New Game on the Switch build (2026-11-10, stock Ryubing, run `emu20`, `input_script` in out/emu_test.toml):** title ->
+  Campaign menu (the 3D elephant scene) -> New Game -> the KYRAT loading screen, 15-22 game fps. Then at ~190 s a
+  deko3d fence never signals (2 s, 4 s) and Ryubing's host Vulkan device is lost: a GPU job that does not finish
+  (next to find: which draw).
+  - The user's run before: the heap ran out at New Game. Fixes: 720 internal and output in both modes (built-in
+    defaults: render targets 561 -> 223 MB), `banjo_renut_textures_reserve_mb` 384 -> 768 (the title's textures had
+    reached 926 MB), stream cache 128 -> 64 MB, and the capture thread skips a shot with under 96 MB of heap (its
+    std::bad_alloc was the fatal throw; in Ryubing any throw is fatal).
+  - Still: deko3d's image memory reaches 1.1 GB while Renut counts ~256 MB of targets and textures (image heap chunks
+    kept until newlib's room < 256 MB, plume_deko3d.cpp heapRoomShort; the GPU region gives back only from its
+    bottom). Garbage texture sizes too (4002x5094, 328 MB, refused for lack of memory).
+  - Stutter: uam compiles take ~3 s each in Ryubing and the generic variants draw meanwhile (5-18 fps in the user's
+    visible run). Next: the PC's pipeline_list.bin into a prebuilt DKSH cache (tools/deko3d_variant_cache.py).
+  - Katamari leftovers to clean up: banjo_pool_lock hooks sub_82333388/sub_823333F0 by Katamari's addresses (only a
+    mutex around the original), and 17 unused banjo_cpu_native_sub_* keys in katamari_switch_defaults.toml.

@@ -117,8 +117,10 @@ banjo_cpu_native_sub_82A02D00 = true
 banjo_cpu_native_sub_822216C8 = true
 banjo_cpu_native_sub_82376768 = true
 banjo_cpu_native_sub_82229C90 = true
-banjo_renut_textures_reserve_mb = 384
-banjo_renut_stream_cache_mb = 128
+# fc4-nx (2026-11-10): FC4 needs far more heap of its own than Katamari; with 384 the title screen's textures reached
+# 926 MB (GPU region peak 1.78 GB) and New Game ran out of heap (guest commits and std::bad_alloc).
+banjo_renut_textures_reserve_mb = 768
+banjo_renut_stream_cache_mb = 64
 banjo_cpu_native_bulk = true
 banjo_hot_guard_calls = 0
 banjo_hot_guard_period = 0
@@ -182,9 +184,11 @@ banjo_renut_smaa = true
 banjo_renut_fur_shells_percent = 75
 banjo_renut_portrait_fur_shells_percent = 50
 banjo_renut_portrait_msaa_samples = 2
+# fc4-nx (2026-11-10, the user: optimise 720p first): 720 internal and output in both modes. Docked at 1080 the
+# heap ran out at New Game (render targets at 1.5x: 561 MB; GPU region peak 1.85 GB).
 banjo_renut_render_height_handheld = 720
-banjo_renut_render_height_docked = 1080
-banjo_renut_display_height_docked = 1080
+banjo_renut_render_height_docked = 720
+banjo_renut_display_height_docked = 720
 banjo_renut_upscale_filter = 0
 banjo_renut_host_mips = false
 banjo_deko3d_async_variants = true
