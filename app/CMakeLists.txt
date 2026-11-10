@@ -609,17 +609,17 @@ if(REXGLUE_PLATFORM_SWITCH)
                      "${CMAKE_CURRENT_SOURCE_DIR}/katamari_switch_defaults.toml"
                      "${CMAKE_CURRENT_SOURCE_DIR}/katamari_switch.toml")
     endif()
-    set(RENUT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/../tools/switch/icon/katamari_icon.jpg")
+    # fc4-nx (2026-11-10): hbmenu showed "Beautiful Katamari" with Katamari's icon. Far Cry 4's own name; libnx's
+    # default icon until there is one for this port (tools/switch/icon/fc4_icon.jpg is used when it exists).
+    set(RENUT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/../tools/switch/icon/fc4_icon.jpg")
     set(RENUT_ICON_ARG)
     if(EXISTS "${RENUT_ICON}")
         set(RENUT_ICON_ARG ICON "${RENUT_ICON}")
     endif()
-    # katamari-nx (2026-11-02, the user's request): author ChanseyIsTheBest, the user's icon (the cover art).
-    # 2026-11-05: version 1.0.1, the game's memory and the NRO's code on 2 MB blocks, and the boot's cvars.
     rexglue_switch_add_nro(renut
-        NAME "Beautiful Katamari"
+        NAME "Far Cry 4"
         AUTHOR "ChanseyIsTheBest"
-        VERSION "1.0.1"
+        VERSION "0.1.0"
         ${RENUT_ICON_ARG})
 endif()
 
