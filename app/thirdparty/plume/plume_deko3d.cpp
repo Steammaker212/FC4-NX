@@ -880,7 +880,16 @@ namespace plume {
         logf("deko3d says (%s, result %d): %s", context ? context : "", int(result), message ? message : "");
     }
 
-    Deko3DDevice::Deko3DDevice() {}
+    static Deko3DDevice *g_deko3dDevice = nullptr;  // fc4-nx (2026-11-10): Deko3DReleaseEmptyChunks
+    Deko3DDevice::Deko3DDevice() { g_deko3dDevice = this; }
+
+    uint64_t Deko3DReleaseEmptyChunks() {
+        Deko3DDevice *device = g_deko3dDevice;
+        if (!device)
+            return 0;
+        std::lock_guard<std::mutex> heap(device->heapMutex);
+        return device->releaseEmptyChunksLocked();
+    }
 
     static void *compileThreadEntry(void *arg) {
         static_cast<Deko3DDevice *>(arg)->compileWorker();
@@ -978,6 +987,8 @@ namespace plume {
     static uint64_t g_boostSince = 0;
 
     Deko3DDevice::~Deko3DDevice() {
+        if (g_deko3dDevice == this)
+            g_deko3dDevice = nullptr;
         {
             std::lock_guard<std::mutex> lock(g_boostMutex);  // banjo-nx (2026-10-23): never left in boost mode
             if (g_boostActive)

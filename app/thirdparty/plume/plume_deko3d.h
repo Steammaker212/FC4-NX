@@ -792,6 +792,9 @@ namespace plume {
     // banjo-nx (2026-10-28, the console's OOM): called when a memory block's storage cannot be had from the heap, before
     // asking again (any thread; it must not take the application's renderer lock): the application's spares go back.
     void Deko3DSetMemoryPressureCallback(void (*callback)());
+    // fc4-nx (2026-11-10): the image heap's empty chunks back to the heap now (any thread; takes the heap lock). The
+    // bytes given back. For the guest heap's commits (RexGmSetMemoryPressureCallback).
+    uint64_t Deko3DReleaseEmptyChunks();
     // fc4-nx (2026-11-10): the last pipeline binds' shader names in a ring, logged when a fence does not signal in 2 s
     // (which draw a GPU hang is in). Off by default: a copy of 48 bytes a bind.
     void Deko3DSetBindTrace(bool on);

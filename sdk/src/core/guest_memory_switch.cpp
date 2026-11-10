@@ -566,7 +566,36 @@ bool RexGmAddView(uint8_t* base, size_t offset, size_t length) {
     return true;
 }
 
+/* fc4-nx (2026-11-10): see RexGmSetMemoryPressureCallback. */
+static std::atomic<void (*)(void)> g_gm_pressure{nullptr};
+extern "C" void RexGmSetMemoryPressureCallback(void (*callback)(void)) { g_gm_pressure.store(callback); }
+
+static bool CommitOnce(size_t offset, size_t length, RexGmAccess access);
+
+/*
+ * fc4-nx (2026-11-10): a commit the heap cannot back is asked again for up to 3 s, the renderer told each time to give
+ * memory back (its unused textures and spare buffers, deko3d's empty chunks: RexGmSetMemoryPressureCallback), before
+ * it fails. Far Cry 4's KYRAT load stalled for good on ~30 failed commits while the renderer held ~1 GB. The wait is
+ * outside the state's lock: page faults and other commits go on meanwhile.
+ */
 bool RexGmCommit(size_t offset, size_t length, RexGmAccess access) {
+    if (CommitOnce(offset, length, access)) return true;
+    if (S().last_result != REX_GM_ERR_NOMEM) return false;
+    static std::atomic<uint32_t> logged{0};
+    for (int attempt = 1; attempt <= 60; attempt++) {
+        if (void (*callback)(void) = g_gm_pressure.load()) callback();
+        svcSleepThread(50000000ull);
+        if (CommitOnce(offset, length, access)) {
+            if (logged.fetch_add(1) < 16)
+                fprintf(stderr, "[gm] commit of 0x%zX bytes had after %d tries (memory given back)\n", length, attempt);
+            return true;
+        }
+        if (S().last_result != REX_GM_ERR_NOMEM) return false;
+    }
+    return false;
+}
+
+static bool CommitOnce(size_t offset, size_t length, RexGmAccess access) {
     /*
      * Memory is always committed accessible. Restricting permissions is the job of
      * RexGmProtect, which works on window addresses and not on mapping offsets (and
@@ -593,7 +622,7 @@ bool RexGmCommit(size_t offset, size_t length, RexGmAccess access) {
      * guest-level commit state is still kept by the heaps in xmemory.cpp.
      */
     const size_t begin = AlignDown(offset, kBlockSize);
-    const size_t end   = std::min(AlignUp(offset + length, kBlockSize), s.size);
+    size_t end         = std::min(AlignUp(offset + length, kBlockSize), s.size);
 
     size_t cur = begin;
     while (cur < end) {
@@ -608,11 +637,29 @@ bool RexGmCommit(size_t offset, size_t length, RexGmAccess access) {
         if (sig != s.chunks.end() && sig->second.offset < gap_end)
             gap_end = sig->second.offset;
 
-        const size_t sz = gap_end - cur;
-        const size_t align = (sz >= kBlockSize && (cur & (kBlockSize - 1)) == 0)
-                                 ? kBlockSize : kPageSize;
+        size_t sz = gap_end - cur;
+        size_t align = (sz >= kBlockSize && (cur & (kBlockSize - 1)) == 0)
+                           ? kBlockSize : kPageSize;
 
         void* backing = memalign(align, sz);
+        if (!backing) {
+            /*
+             * fc4-nx (2026-11-10): no free piece for the whole granule (the heap was fragmented: ~170 MB free and no
+             * aligned 2 MB): only the pages asked for in this gap, page-aligned, and nothing past them.
+             */
+            const size_t lo = std::max(cur, AlignDown(offset, kPageSize));
+            const size_t hi = std::min(gap_end, AlignUp(offset + length, kPageSize));
+            if (lo < hi && (lo != cur || hi != gap_end || align != kPageSize)) {
+                backing = memalign(kPageSize, hi - lo);
+                if (backing) {
+                    cur = lo;
+                    gap_end = hi;
+                    sz = hi - lo;
+                    align = kPageSize;
+                    end = std::min(end, AlignUp(offset + length, kPageSize));
+                }
+            }
+        }
         if (!backing) {
             s.last_result = REX_GM_ERR_NOMEM;
             return false;

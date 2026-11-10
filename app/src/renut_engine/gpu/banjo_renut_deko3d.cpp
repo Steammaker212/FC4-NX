@@ -12,6 +12,10 @@
 
 #include <unistd.h>  // ftruncate (LoadCache)
 
+#if defined(__SWITCH__)
+extern "C" void RexGmSetMemoryPressureCallback(void (*callback)(void));  // fc4-nx: sdk core/guest_memory_switch.h
+#endif
+
 #include <fmt/format.h>
 #include <rex/cvar.h>
 #include <rex/logging.h>
@@ -19,6 +23,7 @@
 
 #include "renut_engine/gpu/banjo_renut_tuning.h"
 #include "renut_engine/gpu/guest/command_buffers.h"  // banjo-nx (2026-10-28): ReleaseSpareBuffersNow
+#include "renut_engine/gpu/render/textures.h"  // fc4-nx (2026-11-10): RequestTextureRelief
 #include "renut_engine/gpu/shaders/shader_cache.h"  // banjo-nx (2026-10-22): the installed package's shader table
 
 #if defined(PLUME_DEKO3D)
@@ -467,6 +472,15 @@ void InstallShaderCache() {
   plume::Deko3DSetOptions(options);
   // banjo-nx (2026-10-28, the console's OOM): a block that finds no room in the heap gets the spare command buffers'.
   plume::Deko3DSetMemoryPressureCallback(+[] { ::renut::gpu::ReleaseSpareBuffersNow(); });
+  // fc4-nx (2026-11-10): a guest heap commit that finds no room: the spare buffers, the textures nothing drew with for a
+  // second (at the render thread's next frame) and deko3d's empty chunks go back (sdk guest_memory_switch.cpp).
+#if defined(__SWITCH__)
+  RexGmSetMemoryPressureCallback(+[] {
+    ::renut::gpu::ReleaseSpareBuffersNow();
+    ::renut::gpu::RequestTextureRelief();
+    (void)plume::Deko3DReleaseEmptyChunks();
+  });
+#endif
   plume::Deko3DSetBindTrace(REXCVAR_GET(banjo_deko3d_bind_trace));  // fc4-nx (2026-11-10)
   plume::Deko3DSetGpuRegion(Deko3DGpuRegionOn());  // banjo-nx (2026-10-28, h10)
   plume::Deko3DSetVertexBufferDedupe(Deko3DVtxDedupeOn());  // banjo-nx (2026-10-26, Unleashed-style step 2)

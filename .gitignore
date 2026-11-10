@@ -46,3 +46,6 @@ pgo/*
 # ...except the PGO profile of the released NRO (counts of which code ran, no game code or data)
 !pgo/*.gcda
 !pgo/README.txt
+
+# fc4-nx (2026-11-10): the icon is made from the game's own logo (tools/switch/make_fc4_icon.py)
+tools/switch/icon/fc4_icon.jpg

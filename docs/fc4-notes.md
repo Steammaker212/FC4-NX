@@ -544,3 +544,12 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   stalled. Targets over 4 Mi samples (2048x2048 at 1x) are now refused like those over 8192 a side (surfaces.cpp).
 - Still to do for load time: Renut's host texture copies reach ~1.2 GB during the load (all fresh, none cold to
   evict); a Switch option to drop large textures' top mip would cut that ~4x and the upload time with it.
+- hw6 (junk targets refused, 32 of them): the load still stalled on 34 failed guest commits 13 s in (backing 504-536 MB;
+  deko3d's GPU region 1,126 MB holding ~936 MB, Renut's own images ~480 MB of it; the loading screen draws at 25 fps,
+  where hw2's loaded with no frames and images at ~400 MB). The guest's backing is memalign(2 MB, 2 MB) from newlib;
+  ~170 MB was free but fragmented. Now (sdk guest_memory_switch.cpp): a granule that cannot be had falls back to the
+  requested pages only (page-aligned), and a commit still short is retried for up to 3 s after
+  RexGmSetMemoryPressureCallback (Renut: spare command buffers, RequestTextureRelief = host textures not drawn with for
+  a second, plume Deko3DReleaseEmptyChunks).
+- Icon: tools/switch/make_fc4_icon.py makes tools/switch/icon/fc4_icon.jpg (256x256) from the disc's SPLASH_720.PNG;
+  git-ignored (game-derived), embedded by app/CMakeLists.txt (reconfigure after making it).

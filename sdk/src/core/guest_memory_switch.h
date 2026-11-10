@@ -115,6 +115,9 @@ bool RexGmAddView(uint8_t* base, size_t offset, size_t length);
  * Idempotent: what is already committed is left as it is.
  */
 bool RexGmCommit(size_t offset, size_t length, RexGmAccess access);
+/* fc4-nx (2026-11-10): called (any thread, no lock of the caller's held) when a commit cannot be backed, before it is
+ * tried again: the application gives memory back. */
+void RexGmSetMemoryPressureCallback(void (*callback)(void));
 
 /* The reverse. Frees the backing. */
 bool RexGmDecommit(size_t offset, size_t length);

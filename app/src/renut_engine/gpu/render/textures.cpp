@@ -1066,6 +1066,22 @@ uint64_t g_texture_epoch = 1;  // banjo-nx (2026-10-19, CPU proposal 2)
 uint64_t g_layout_epoch = 1;   // banjo-nx (2026-10-26): see textures.h
 uint64_t g_depth_epoch = 1;    // banjo-nx (2026-10-19, render-thread proposal 3)
 
+// fc4-nx (2026-11-10): see RequestTextureRelief (textures.h).
+std::atomic<bool> g_relief_requested{false};
+void RequestTextureRelief() { g_relief_requested.store(true, std::memory_order_release); }
+static void ReleaseForReliefLocked() {
+  constexpr uint64_t kReliefIdleFrames = 30;
+  std::vector<u32> idle;
+  for (const auto &[va, t] : g_textures)
+    if (!t || (!t->gpu_written && g_frame - t->used_frame >= kReliefIdleFrames))
+      idle.push_back(va);
+  for (u32 va : idle)
+    ReleaseHostTextureLocked(va);
+  static uint32_t logged = 0;
+  if (logged++ < 16)
+    RGPU_WARN("Textures: the guest heap is short; {} host textures not drawn with for a second released", idle.size());
+}
+
 // fc4-nx (2026-11-10): see g_page_slot_header.
 static void ReleaseStaleResolvePagesLocked() {
   std::vector<u32> stale;
@@ -1096,6 +1112,8 @@ void AdvanceTextureFrameLocked() {
   ApplyUnlocksLocked();
   if (g_frame % 4 == 0)
     ReleaseStaleResolvePagesLocked();
+  if (g_relief_requested.load(std::memory_order_relaxed) && g_relief_requested.exchange(false))
+    ReleaseForReliefLocked();
   if (g_frame % kEvictCheckFrames == 0)
     EvictIdleTexturesLocked();
   // banjo-nx: banjo_renut_memory_policy. Every kColdCheckFrames frames, and under pressure every second.
