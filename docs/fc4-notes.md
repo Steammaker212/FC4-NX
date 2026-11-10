@@ -538,3 +538,9 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   almost every frame; GPU-written images are never idle-evicted (banjo_renut_keep_gpu_written), so they piled up.
   Now a page-keyed destination that is not its header's latest goes after 8 unused frames
   (ReleaseStaleResolvePagesLocked). PC: 534 released in the first 10 s of boot, ~40 held after.
+- hw5 (stale pages released): images steady at ~534 MB, but the KYRAT load still never finished: at New Game a
+  junk-sized render target was made (a 562 MiB image heap chunk) and others refused (6234x3213, 4352x7292, 3983x2622:
+  size words through bad descriptors; every run has ~15-30 of them), then 30 guest commit failures and the load
+  stalled. Targets over 4 Mi samples (2048x2048 at 1x) are now refused like those over 8192 a side (surfaces.cpp).
+- Still to do for load time: Renut's host texture copies reach ~1.2 GB during the load (all fresh, none cold to
+  evict); a Switch option to drop large textures' top mip would cut that ~4x and the upload time with it.

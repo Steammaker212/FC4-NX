@@ -282,10 +282,16 @@ bool BuildTarget(HostSurface &surface, const d3d::SurfaceDesc &desc, uint32_t mi
   // a size word read through a bad descriptor). On PC their creation only failed; on the Switch deko3d made one of 1.4 GB
   // and Ryubing ran out of device memory a minute in. No texture: the failure path below, without its error line.
   constexpr uint32_t kMaxTargetSize = 8192;
-  const bool impossible = surface.width > kMaxTargetSize || surface.height > kMaxTargetSize;
+  // fc4-nx (2026-11-10): nor more than 4 Mi samples (2048x2048 at 1x, 1.6 times the 10 MiB of EDRAM at 32 bits a
+  // sample). FC4's real targets are 1280x720 and smaller; at New Game it binds junk-sized ones (6234x3213, 4352x7292,
+  // 3983x2622 ...): on the console one of 562 MB was made and the guest heap could not commit (the KYRAT load stalled).
+  constexpr uint64_t kMaxTargetSamples = 2048ull * 2048ull;
+  const bool impossible =
+      surface.width > kMaxTargetSize || surface.height > kMaxTargetSize ||
+      uint64_t(surface.width) * surface.height * std::max(1u, u32(surface.samples)) > kMaxTargetSamples;
   if (impossible) {
     static uint32_t logged = 0;
-    if (logged++ < 16)
+    if (logged++ < 32)
       RGPU_WARN("Surface {:08X}: {}x{} {} target is larger than Xenos allows (size word {:08X}): not created",
                 surface.guest_va, surface.width, surface.height, surface.depth ? "depth" : "color", surface.size_word);
   } else if (surface.depth) {
