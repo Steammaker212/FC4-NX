@@ -242,12 +242,21 @@ uint2 getTexture2DDimensions(Texture2D<float4> texture)
 // host renders at a ratio of the guest resolution, and the textures resolved from its render
 // targets are that ratio of their guest size (rounded); texel offsets and texel coordinates are in
 // guest texels, so the sizes the fetches use are the guest's.
-#define RENUT_DESCRIPTOR_INDEX_MASK 0x03FFFFFFu
+// fc4-nx (2026-11-10): bits 20-25 carry the fetch constant's exponent adjust (signed, dword 3 bits 13-18): the
+// texture fetch result times 2^adjust, which the Xenos applies and Renut did not (Far Cry 4 binds ~120 such textures a
+// frame). The slot is the low 20 bits (8192 descriptors; deko3d's binding masks 20 bits too).
+#define RENUT_DESCRIPTOR_INDEX_MASK 0x000FFFFFu
 #define RENUT_RESOLUTION_SCALE_SHIFT 26u
 
 uint renutDescriptor(uint resourceDescriptorIndex)
 {
     return resourceDescriptorIndex & RENUT_DESCRIPTOR_INDEX_MASK;
+}
+
+// 2^adjust for the exponent adjust in bits 20-25 (1.0 when there is none).
+float renutExpScale(uint resourceDescriptorIndex)
+{
+    return exp2(float(int(resourceDescriptorIndex << 6u) >> 26));
 }
 
 // Host texels per guest texel, by the host's RenderScale code (render_scale.h): 1x, 2/3 (480p),

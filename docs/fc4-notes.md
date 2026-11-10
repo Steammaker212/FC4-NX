@@ -475,3 +475,28 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   itself (xthread.cpp set_name). The menus also mix about twice the usual blocks a second (two clients).
 - Still to do: the texture fetch exponent adjust (650 binds; shader_common.h tfetch* and draw.cpp BindingWords, index
   bits 20-25 are free: 8192 slots), the 322 Fog/PointSize vertex shaders, the vertex-copy cost (address window).
+
+## Exponent adjust, all 6,523 shaders, core spread (2026-11-10)
+- **Texture fetch exponent adjust** (Xenos fetch dword 3 bits 13-18, signed: the fetched value times 2^adjust; ~780
+  binds per 10 s in gameplay, 645 negative). draw.cpp BindingWords puts it in descriptor index bits 20-25
+  (textures.h kExpAdjustShift); shader_common.h masks the index (RENUT_DESCRIPTOR_INDEX_MASK, 0xFFFFF) and
+  XenosRecomp multiplies each tfetch by renutExpScale(index) = exp2(signed bits 20-25). Suspected cause of the black
+  after the Pagan Min scene on PC (the luminance chain 320x176 -> 80x44 -> 64x64 read 2^n too bright or dark).
+- **Census with the current tree** (`fc4_shader_census.py --out out/fc4_shaders/census_exp --dxc "" --dxc-spirv
+  out/fc4_shaders/dxc/bin/x64 --spirv-cross ...`): all 6,523 translate to GLSL and uam (the 322 Fog/PointSize vertex
+  shaders included). Package: out/deko3d_shaders/glsl_exp (upper-case names) -> out/deko3d_pkg/deko3d_glsl.bin
+  (10.6 MB). Run `py -3`: Git Bash has no `python`.
+- **Cores (hw2 profile):** the process has cores 0-2. sa2-nx's layout (sa2_renut_core_layout) kept the guest main
+  thread alone on core 0 and every other guest thread on cores 1-2 preferring 2; FC4's main thread is idle in
+  gameplay (0 %) while its six job threads (Core_0/1/2 - Thread, ~165 % of a core in all) and the render thread
+  (core 1, 0x2C, ~23 %) shared two cores. Now: the layout off in the Switch defaults, and each guest thread prefers the
+  Switch core of the Xbox core the game put it on (hardware threads 0-1, 2-3, 4-5 -> cores 0, 1, 2; mask 0x7;
+  cvar xbox_core_spread, xthread.cpp PreferXboxCore).
+- **Where hw2's frame went:** title/menus 12-18 fps with the render thread ~4 ms and the GPU ~8 ms (the game's threads
+  are the limit); gameplay 12-15 fps with the render thread 44-52 ms a frame and the GPU 25-38 ms (at 1428 / 614 MHz
+  in that interval). Render thread per 10 s: ~95k draws, 977 MB of upload ring cleaned (armDCacheClean ~17 ms/s),
+  16.5k kicks, 3.8k pipelines made. `switch_profile_stacks = true` (1 kHz stack samples in rex_profile.log, image
+  offsets for addr2line on the ELF) is the next step for the render thread's functions.
+- **Audio in the recordings** (WinRT MediaTranscoder to WAV, no ffmpeg): the menu/title recordings have no
+  discontinuities; the intro cutscenes and gameplay have 10-58 a second in clusters 16-48 samples apart, not on
+  256-sample block edges (likely the scenes' own transients, not the mixer).

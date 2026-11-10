@@ -1256,8 +1256,8 @@ void StatsGameFrame() {
   if (const uint64_t n = g_exp_adjust[0].exchange(0, std::memory_order_relaxed)) {
     const uint64_t neg = g_exp_adjust[1].exchange(0, std::memory_order_relaxed);
     const uint64_t pos = g_exp_adjust[2].exchange(0, std::memory_order_relaxed);
-    REXLOG_WARN("[renut] exponent adjust: {} texture binds with a fetch exponent adjust ({} negative, {} positive), "
-                "which Renut does not apply (the sampled values are 2^adjust too large or small)", n, neg, pos);
+    REXLOG_INFO("[renut] exponent adjust: {} texture binds with a fetch exponent adjust ({} negative, {} positive), "
+                "applied in the shader (descriptor index bits 20-25, renutExpScale)", n, neg, pos);
   }
   if (REXCVAR_GET(banjo_deko3d_skin_once)) {
     uint64_t k[8];

@@ -601,6 +601,9 @@ void ShaderRecompiler::recompile(const TextureFetchInstruction& instr, bool bicu
         if (subtractFromOne)
             out += "1.0 - ";
     #endif
+    #ifdef RENUT_RECOMP
+        out += '(';  // fc4-nx (2026-11-10): (tfetch...(...) * renutExpScale(index)), closed after the arguments
+    #endif
 
         out += "tfetch";
         break;
@@ -705,6 +708,9 @@ void ShaderRecompiler::recompile(const TextureFetchInstruction& instr, bool bicu
 #ifdef RENUT_RECOMP
     if (explicitLod)
         out += instr.useRegLod ? ", lod" : ", 0.0";
+    // fc4-nx (2026-11-10): the fetch constant's exponent adjust (shader_common.h renutExpScale), as the Xenos applies it.
+    if (instr.opcode == FetchOpcode::TextureFetch)
+        print(") * renutExpScale({}_Texture{}DescriptorIndex)", constNamePtr, dimension);
 #endif
 
     out += ").";

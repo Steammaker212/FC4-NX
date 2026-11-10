@@ -50,12 +50,30 @@ REXCVAR_DEFINE_BOOL(ignore_thread_priorities, true, "Kernel",
 REXCVAR_DEFINE_BOOL(ignore_thread_affinities, true, "Kernel",
                     "Ignores game-specified thread affinities");
 
+REXCVAR_DEFINE_BOOL(xbox_core_spread, true, "Kernel",
+                    "Switch: each guest thread prefers the core matching the Xbox core the game put it on (hardware "
+                    "threads 0-1, 2-3, 4-5 -> cores 0, 1, 2), allowed on all three. Off: the system default core")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
 #if REX_PLATFORM_SWITCH
 namespace {
 // banjo-nx (2026-10-20, from sa2-nx, RexSetGuestThreadCoreLayout): the guest threads' cores besides the main thread's (0: the
 // process's, as before), and the preferred one among them, for the threads created from then on.
 std::atomic<uint32_t> g_guest_core_mask{0};
 std::atomic<int32_t> g_guest_core_preferred{-1};
+
+// fc4-nx (2026-11-10): a guest thread prefers the Switch core matching its Xbox core (hardware threads 0-1 -> core 0,
+// 2-3 -> 1, 4-5 -> 2) and may run on all three. FC4's job threads (Core_0/1/2) are placed by the game itself; before,
+// every one preferred the same core while the main thread (idle in gameplay) had core 0 to itself.
+void PreferXboxCore(void* native_handle, uint8_t cpu_index, bool current) {
+  if (!REXCVAR_GET(xbox_core_spread) || g_guest_core_mask.load(std::memory_order_acquire)) return;
+  const int core = std::min<int>(cpu_index / 2, 2);
+  if (current) {
+    (void)RexSwitchSetCurrentThreadMask(core, 0x7);
+  } else {
+    (void)RexSwitchSetThreadMaskOf(native_handle, core, 0x7);  // false until the thread has registered itself
+  }
+}
 }  // namespace
 #endif
 
@@ -506,6 +524,8 @@ X_STATUS XThread::Create() {
       const uint32_t mask = g_guest_core_mask.load(std::memory_order_acquire);
       if (mask)
         RexSwitchSetCurrentThreadMask(g_guest_core_preferred.load(std::memory_order_relaxed), mask);
+      else
+        PreferXboxCore(nullptr, active_cpu(), true);  // (SetActiveCpu may run before or after this; both apply it)
     }
 #endif
     runtime::ThreadState::Bind(thread_state_.get());
@@ -981,6 +1001,9 @@ void XThread::SetActiveCpu(uint8_t cpu_index) {
       thread_->set_affinity_mask(uint64_t(1) << cpu_index);
     }
   } else {
+#if REX_PLATFORM_SWITCH
+    if (is_guest_thread() && !main_thread_ && thread_) PreferXboxCore(thread_->native_handle(), cpu_index, false);
+#endif
     // Once. With fewer than 6 cores it warned on every call, and the
     // GPU interrupt makes that call on every vblank: on Switch, 60 warnings per
     // second written and flushed to the SD (29,771 in six minutes).

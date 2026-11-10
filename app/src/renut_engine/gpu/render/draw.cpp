@@ -1814,6 +1814,9 @@ bool BindTargets(const Targets &t, bool depth_writes = true) {
               t.color_count ? t.colors[0]->height : 0, t.color_count ? u32(t.colors[0]->format) : 0,
               t.color_count ? u32(t.colors[0]->samples) : 0, t.depth ? t.depth->guest_va : 0,
               t.depth ? t.depth->width : 0, t.depth ? t.depth->height : 0, t.depth ? u32(t.depth->samples) : 0);
+    if (t.color_count)  // fc4-nx (2026-11-10): the view's words, to match a resolve's source with what was drawn
+      RGPU_INFO("[trace]   colour 0 view of {:08X} (info {:08X} format {:08X} size {:08X})", t.colors[0]->guest_va,
+                t.colors[0]->info_word, t.colors[0]->format_word, t.colors[0]->size_word);
     g_trace_draws = 0;
   }
   if (g_bound.framebuffer != framebuffer) {
@@ -3144,6 +3147,9 @@ void BindingWords(const TextureBinding &binding, const TextureFetch &fetch, u32 
   // shader_common.h), with the fetch constant's filter between layers and
   // its Z address mode.
   index = binding.slot | binding.scale.code << kResolutionScaleShift;
+  // fc4-nx (2026-11-10): the fetch constant's exponent adjust in bits 20-25 (shader_common.h renutExpScale: the fetch
+  // result times 2^adjust). Far Cry 4 binds ~120 such textures a frame; Renut used to leave it out.
+  index |= (uint32_t(fetch.ExpAdjust()) & 0x3Fu) << kExpAdjustShift;
   if (binding.stacked) {
     index |= kStackedTextureBit;
     if (fetch.VolumeMagFilter() != TextureFilter::Point ||
@@ -11997,10 +12003,12 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
   if (banjo::renut_gpu::ResolveTraceOn() && surface) {
     const ClearRect r = source_rect ? *source_rect : ClearRect{0, 0, -1, -1};
     RGPU_INFO("[trace] resolve {} {:08X} ({}x{} fmt {} samples {}) -> texture {:08X} at ({},{}) level {} slice {}, "
-              "rect ({},{})-({},{}), flags {:X} ({}{})",
+              "rect ({},{})-({},{}), flags {:X} ({}{}); view of {:08X} (info {:08X} format {:08X} size {:08X}), "
+              "{} writes",
               surface->depth ? "depth" : "colour", source_va, surface->width, surface->height, u32(surface->format),
               u32(surface->samples), dest_texture_va, dest_x, dest_y, dest_level, dest_slice, r.x1, r.y1, r.x2, r.y2,
-              flags, (flags & 0x100) ? "clear colour after " : "", (flags & 0x200) ? "clear depth after" : "");
+              flags, (flags & 0x100) ? "clear colour after " : "", (flags & 0x200) ? "clear depth after" : "",
+              surface->guest_va, surface->info_word, surface->format_word, surface->size_word, surface->writes);
   }
   plume::RenderCommandList *cmd = s.command_list;
   static uint32_t depth_logged = 0;
