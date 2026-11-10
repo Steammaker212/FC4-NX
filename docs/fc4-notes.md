@@ -393,3 +393,22 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   handle; guest_memory_switch.cpp uses `CUR_PROCESS_HANDLE` for `svcMapProcessCodeMemory`, which stock Ryubing
   (canary, reports 1.3.352) rejects. katamari-nx was tested on "the user's patched Ryubing" (another PC); only the
   stock build is on this one. On a console hbloader passes the real handle.
+- Later the same night, stock Ryubing boots the game (run `emu14`: 300 s, ~30 game frames a second, 200k draws, heap
+  905 MB free at the end) with these fixes:
+  - `REX_SWITCH_FALLBACK_EXE` (app/CMakeLists.txt) named katamari-nx's NRO: now `/switch/fc4-nx/fc4-nx.nro`. The
+    rooted form matters: `sdmc:/...` is relative to libstdc++, `std::filesystem::absolute` made it `/sdmc:/...` and
+    `status` threw in `Runtime::SetupVfs`. `RenutApp::AppFolder()` is just `GetExecutableFolder()` again.
+  - guest_memory_switch.cpp: without a loader, a real process handle from a session to itself (nx-hbloader's way,
+    plus an empty reply: closing the session without one never wakes the sender in Ryubing). Taken in `RexGmInit`
+    before `virtmemLock`: `threadCreate` takes that lock for the stack, so under it the NRO hung.
+  - switch_code_blocks.cpp: the emulator-only swap self-test is opt-in (`REX_CODE_BLOCKS_SELF_TEST`): Eden accepted
+    the pseudo-handle, ran it and died (access violation in eden.exe). Eden then dies elsewhere (0xC0000409, no log
+    line); the user prefers Ryubing (closer to the console), so Eden is not pursued.
+  - Any C++ throw kills the NRO in stock Ryubing: GCC 16's libgcc unwinder holds `mrs x1, gcspr_el0` (behind
+    `chkfeat`, never run on an A57) and Ryubing's JIT fails to translate it. `src/switch_throw_trace.cpp`
+    (`--wrap=__cxa_throw`, `--wrap=_Unwind_RaiseException`) writes each throw and its stack to rex_stderr.log.
+  - surfaces.cpp: colour/depth targets over 8192 a side (FC4's garbage sizes, 11623x28197) are not created; deko3d
+    had made one of 1.4 GB and Ryubing ran out of device memory at 61 s.
+- Still black: `no GLSL package (deko3d_glsl.bin beside the NRO, or built in): no game shaders` (101 "Creating
+  shader failed", uam 0 compiles), and the front buffer lookup misses. Next: the deko3d GLSL package for FC4's 6,523
+  shaders (docs/fc4-shaders.md; tools/switch_shaders.ps1, tools/renut_release_shaders.py).

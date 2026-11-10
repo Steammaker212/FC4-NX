@@ -20,11 +20,11 @@ if ($freeCommit -lt $MinCommitGB) { Write-Output ("free commit memory {0:N1} GB 
 if (-not (Test-Path $built)) { Write-Output "no NRO at $built (tools/fc4_build_switch.bat)"; exit 4 }
 New-Item -ItemType Directory -Force $sd | Out-Null
 Copy-Item $built $nro -Force
-# Ryubing gives a command-line NRO no folder in argv[0], so GetExecutableFolder() is sdmc:/ there (a real Switch's
-# hbmenu gives sdmc:/switch/fc4-nx/): game_root and katamari.toml go to both folders.
+# Ryubing gives a command-line NRO no argv: the NRO then uses REX_SWITCH_FALLBACK_EXE, /switch/fc4-nx/fc4-nx.nro.
+# Its log (log_file in the toml) is copied when it is on the SD root.
 $sdRoot = Join-Path $data "sdcard"
 $game = (Resolve-Path (Join-Path $root "..\game")).Path
-foreach ($dir in @($sd, $sdRoot)) {
+foreach ($dir in @($sd)) {
   $gameRoot = Join-Path $dir "game_root"
   if (-not (Test-Path $gameRoot)) {
     # $env:ComSpec, not cmd: from Git Bash's PATH "cmd" is devkitPro msys2's cmd script.
@@ -33,7 +33,7 @@ foreach ($dir in @($sd, $sdRoot)) {
   if (-not (Test-Path (Join-Path $gameRoot "default.xex"))) { Write-Output "no game files at $gameRoot"; exit 5 }
   if ($Toml) { Copy-Item $Toml (Join-Path $dir "katamari.toml") -Force }
 }
-$logs = Join-Path $sdRoot "logs"
+$logs = Join-Path $sd "logs"
 New-Item -ItemType Directory -Force $out | Out-Null
 if (Test-Path $logs) { Remove-Item -Recurse -Force $logs }
 $started = Get-Date
@@ -47,6 +47,10 @@ if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force; Write-Output "stopped pi
 else { Write-Output "Ryujinx exited by itself (code $($p.ExitCode))" }
 Start-Sleep -Seconds 2
 if (Test-Path $logs) { Copy-Item -Recurse $logs (Join-Path $out "logs") -Force }
+foreach ($f in @("fc4_emu.log", "switch/rex_stderr.log", "switch/fc4-nx/logs/rex/rex_stderr.log")) {
+  $path = Join-Path $sdRoot $f
+  if ((Test-Path $path) -and (Get-Item $path).LastWriteTime -ge $started) { Copy-Item $path $out -Force }
+}
 # Not -Recurse: it would walk the game through the junction.
 @($sd, (Join-Path $sd "capturas"), $sdRoot, (Join-Path $sdRoot "capturas")) | ForEach-Object {
   Get-ChildItem $_ -Filter "*.png" -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge $started } |

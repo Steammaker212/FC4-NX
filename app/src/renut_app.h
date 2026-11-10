@@ -282,16 +282,11 @@ public:
         banjo::pgo::Stop();
     }
 
-    // The folder of the executable. fc4-nx (2026-11-09): Ryubing starts an NRO with no folder in argv[0]
-    // (GetExecutableFolder() empty: no game_root found, "--game_data_root was not provided", exit after 12 s), so
-    // on the Switch the install folder hbmenu gives, sdmc:/switch/fc4-nx.
-    static std::filesystem::path AppFolder() {
-        auto folder = rex::filesystem::GetExecutableFolder();
-#if REX_PLATFORM_SWITCH
-        if (folder.empty()) folder = "sdmc:/switch/fc4-nx";
-#endif
-        return folder;
-    }
+    // The folder of the executable. Ryubing starts an NRO with no argv: the SDK then uses REX_SWITCH_FALLBACK_EXE
+    // (app/CMakeLists.txt, /switch/fc4-nx/fc4-nx.nro; fc4-nx 2026-11-09: it still named katamari-nx's, so no game_root,
+    // "--game_data_root was not provided", exit after 12 s). Rooted "/switch/...", not "sdmc:/...": libstdc++ takes
+    // the latter as relative and std::filesystem::absolute makes it "/sdmc:/..." (filesystem_error in SetupVfs).
+    static std::filesystem::path AppFolder() { return rex::filesystem::GetExecutableFolder(); }
 
     // A game_root folder next to the executable is used when no path was given.
     // On the Switch that is sdmc:/switch/fc4-nx/game_root (the extracted disc).

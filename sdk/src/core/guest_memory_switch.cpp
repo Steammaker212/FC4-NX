@@ -124,11 +124,67 @@ State& S() {
     return s;
 }
 
+/*
+ * fc4-nx (2026-11-09): without a loader, a real handle to this process the way nx-hbloader gets its own: a session to
+ * itself, CUR_PROCESS_HANDLE sent as a copy handle, and the kernel puts the process object in the receiver's table.
+ * Stock Ryubing refuses the pseudo-handle in svcMapProcessCodeMemory (0xE401, InvalidHandle: no guest memory at all).
+ */
+void SelfHandleReceive(void* arg) {
+  Handle* io = static_cast<Handle*>(arg);  // in: the server session; out: the received handle
+  const Handle session = *io;
+  *io = INVALID_HANDLE;
+  void* base = armGetTls();
+  hipcMakeRequestInline(base);
+  s32 index = 0;
+  const Result rc = svcReplyAndReceive(&index, &session, 1, INVALID_HANDLE, 2000000000ull);
+  if (R_SUCCEEDED(rc)) {
+    const HipcParsedRequest r = hipcParseRequest(base);
+    if (r.meta.num_copy_handles == 1) *io = r.data.copy_handles[0];
+    // An empty reply, so the sender's svcSendSyncRequest returns. nx-hbloader closes the session instead; stock
+    // Ryubing then never wakes the sender (the NRO hung here, 300 s at "Guest memory arena mapped").
+    hipcMakeRequestInline(base);
+    svcReplyAndReceive(&index, &session, 0, session, 0);
+  } else {
+    fprintf(stderr, "[guest memory] no loader: receive 0x%X\n", rc);
+  }
+  svcCloseHandle(session);
+}
+
+Handle SelfProcessHandle() {
+  Handle server = INVALID_HANDLE, client = INVALID_HANDLE;
+  Result rc = svcCreateSession(&server, &client, 0, 0);
+  if (R_FAILED(rc)) {
+    fprintf(stderr, "[guest memory] no loader: svcCreateSession 0x%X, using the pseudo-handle\n", rc);
+    return INVALID_HANDLE;
+  }
+  Handle io = server;
+  Thread t;
+  rc = threadCreate(&t, SelfHandleReceive, &io, nullptr, 0x1000, 0x2C, -2);
+  if (R_SUCCEEDED(rc)) rc = threadStart(&t);
+  if (R_FAILED(rc)) {
+    fprintf(stderr, "[guest memory] no loader: receive thread 0x%X, using the pseudo-handle\n", rc);
+    svcCloseHandle(client);
+    svcCloseHandle(server);
+    return INVALID_HANDLE;
+  }
+  fprintf(stderr, "[guest memory] no loader: asking a session to itself for the process handle\n");
+  hipcMakeRequestInline(armGetTls(), .num_copy_handles = 1).copy_handles[0] = CUR_PROCESS_HANDLE;
+  rc = svcSendSyncRequest(client);
+  fprintf(stderr, "[guest memory] no loader: request returned 0x%X\n", rc);
+  svcCloseHandle(client);
+  threadWaitForExit(&t);
+  threadClose(&t);
+  fprintf(stderr, "[guest memory] no loader: process handle 0x%X from a session to itself\n", io);
+  return io;
+}
+
 // banjo-nx (2026-10-17): hbloader passes the process handle; an emulator (Ryujinx) runs NROs without a loader, so
-// there is none, and the current-process pseudo-handle stands in for it.
+// there is none: a handle got from a session to itself (above), else the current-process pseudo-handle.
 Handle Proc() {
   const Handle h = envGetOwnProcessHandle();
-  return h != INVALID_HANDLE ? h : CUR_PROCESS_HANDLE;
+  if (h != INVALID_HANDLE) return h;
+  static const Handle self = SelfProcessHandle();
+  return self != INVALID_HANDLE ? self : CUR_PROCESS_HANDLE;
 }
 
 /*
@@ -375,6 +431,10 @@ uint8_t* RexGmInit(size_t size) {
     State& s = S();
     std::lock_guard<std::mutex> lock(s.mutex);
     if (s.base) return s.base;
+
+    // fc4-nx (2026-11-09): the process handle now, outside virtmemLock: without a loader Proc() starts a thread
+    // (SelfProcessHandle), and threadCreate takes virtmemLock for the stack (RexGmCommit calls Proc() under it: hang).
+    (void)Proc();
 
     /*
      * kameo-nx (2026-11-05, found by the Torchlight port): the second argument of virtmemFindAslr is a guard, not an

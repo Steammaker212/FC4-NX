@@ -155,7 +155,7 @@ rexglue_setup_target(renut GPU_PLUGINS xenos)
 # banjo-nx (2026-10-17): Ryujinx starts NROs without argv[0]; the SDK then takes the NRO's usual place on the SD
 # (sdk/src/core/filesystem_posix.cpp). A console's hbloader always passes the path, so nothing changes there.
 if(REXGLUE_PLATFORM_SWITCH AND TARGET rexcore)
-    target_compile_definitions(rexcore PRIVATE REX_SWITCH_FALLBACK_EXE="/switch/katamari-nx/katamari-nx.nro")
+    target_compile_definitions(rexcore PRIVATE REX_SWITCH_FALLBACK_EXE="/switch/fc4-nx/fc4-nx.nro")
 endif()
 
 # banjo-nx (2026-10-16): Renut's Direct3D-level renderer as a second renderer, chosen at boot (banjo_renderer = "renut";
@@ -589,6 +589,11 @@ if(REXGLUE_PLATFORM_SWITCH)
     # Link map: which object each function came from, for ranking the profiler's samples per function
     # (tools/switch-cpu-profile.py). It must come from the same build as the NRO that was profiled.
     target_link_options(renut PRIVATE "LINKER:-Map=${CMAKE_BINARY_DIR}/renut.map")
+    # fc4-nx (2026-11-09): every C++ throw written to stderr (type, what(), caller) before it unwinds:
+    # src/switch_throw_trace.cpp. Ryubing cannot unwind at all (GCC 16's libgcc reads GCSPR_EL0, an MRS it does not
+    # know), so the throw is the last thing seen there.
+    target_sources(renut PRIVATE src/switch_throw_trace.cpp)
+    target_link_options(renut PRIVATE "LINKER:--wrap=__cxa_throw" "LINKER:--wrap=_Unwind_RaiseException")
     # katamari-nx (2026-11-02, the user: only these settings in the toml, the rest hardcoded; sa2-nx's design): the fixed
     # settings compiled in (src/renut_app.h BuiltInConfig), and the player's katamari.toml, written next to the NRO when
     # it is missing (DefaultConfigFile). KATAMARI_BUILTIN_CONFIG=OFF: test builds that read a full renut.toml.

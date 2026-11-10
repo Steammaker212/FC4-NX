@@ -308,7 +308,14 @@ void Apply(Handle proc) {
 __attribute__((constructor(101))) void RexCodeBlocksInit() {
   const Handle proc = envGetOwnProcessHandle();
   if (proc == INVALID_HANDLE) {
+    // fc4-nx (2026-11-09): the swap self-test only when asked (REX_CODE_BLOCKS_SELF_TEST=1 at build time). Eden accepts
+    // the pseudo-handle that Ryujinx refuses, runs the swap on its own JIT's code pages and dies (access violation in
+    // eden.exe while the constructors run, before any log line).
+#if defined(REX_CODE_BLOCKS_SELF_TEST) && REX_CODE_BLOCKS_SELF_TEST
     SelfTest(CUR_PROCESS_HANDLE);
+#else
+    snprintf(g_status, sizeof(g_status), "[code blocks] no loader (an emulator), left where it is");
+#endif
     return;
   }
   if (TurnedOffInToml()) {

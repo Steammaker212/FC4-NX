@@ -269,8 +269,17 @@ bool BuildTarget(HostSurface &surface, const d3d::SurfaceDesc &desc, uint32_t mi
 
   plume::RenderDevice *device = Video::Device();
   const plume::RenderMultisampling multisampling(surface.samples);
-  // Sampled too: resolves read them, and so does scan-out of a bound target.
-  if (surface.depth) {
+  // fc4-nx (2026-11-09): Xenos render targets are at most 8192 a side. FC4 binds a few with garbage sizes (11623x28197:
+  // a size word read through a bad descriptor). On PC their creation only failed; on the Switch deko3d made one of 1.4 GB
+  // and Ryubing ran out of device memory a minute in. No texture: the failure path below, without its error line.
+  constexpr uint32_t kMaxTargetSize = 8192;
+  const bool impossible = surface.width > kMaxTargetSize || surface.height > kMaxTargetSize;
+  if (impossible) {
+    static uint32_t logged = 0;
+    if (logged++ < 16)
+      RGPU_WARN("Surface {:08X}: {}x{} {} target is larger than Xenos allows (size word {:08X}): not created",
+                surface.guest_va, surface.width, surface.height, surface.depth ? "depth" : "color", surface.size_word);
+  } else if (surface.depth) {
     surface.texture = device->createTexture(plume::RenderTextureDesc::DepthTarget(
         host_width, host_height, surface.format, multisampling));
   } else {
@@ -281,7 +290,7 @@ bool BuildTarget(HostSurface &surface, const d3d::SurfaceDesc &desc, uint32_t mi
   surface.generation = g_next_generation++;
   if (!TextureCreated(surface.texture.get())) {
     surface.texture.reset();
-    if (!ReportDeviceLost(device)) {
+    if (!impossible && !ReportDeviceLost(device)) {
       RGPU_ERROR("Surface {:08X}: {}x{} {} target creation failed", surface.guest_va,
                  host_width, host_height, surface.depth ? "depth" : "color");
     }
