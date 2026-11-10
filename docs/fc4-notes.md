@@ -412,3 +412,13 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
 - Still black: `no GLSL package (deko3d_glsl.bin beside the NRO, or built in): no game shaders` (101 "Creating
   shader failed", uam 0 compiles), and the front buffer lookup misses. Next: the deko3d GLSL package for FC4's 6,523
   shaders (docs/fc4-shaders.md; tools/switch_shaders.ps1, tools/renut_release_shaders.py).
+- **First picture on the Switch build (2026-11-10, stock Ryubing, run `emu17`):** Ubisoft logo, Dunia Engine, the Far
+  Cry 4 title screen ("PRESS A TO START"), ~29 game frames a second for 300 s, no crash. The deko3d GLSL package:
+  the census's 6,201 GLSL files (`out/fc4_shaders/census/glsl`, renamed to upper-case hashes, which
+  `deko3d_glsl_opt.py` and the packager require) -> `tools/deko3d_glsl_opt.py` -> `tools/deko3d_shader_package.py
+  --out out/deko3d_pkg` (76 MB of GLSL, 8.4 MB package); `tools/fc4_run_ryujinx.ps1` copies `deko3d_glsl.bin` beside
+  the NRO. Missing: the 322 vertex shaders with Fog/PointSize inputs (docs/fc4-shaders.md: needs the location rows
+  and vertex_format.cpp).
+- Memory: docked at 1080 (render targets 1.5x) the heap ran out (`emu16`: 94 MB free, std::bad_alloc in the capture
+  thread). `banjo_renut_render_height_docked = 720` held it at 239 MB free; menus still draw at the HUD's 1.5x
+  (surfaces.cpp: display scale until a 3D composite is seen). GPU region peak 1.85 GB.

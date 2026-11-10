@@ -20,6 +20,9 @@ if ($freeCommit -lt $MinCommitGB) { Write-Output ("free commit memory {0:N1} GB 
 if (-not (Test-Path $built)) { Write-Output "no NRO at $built (tools/fc4_build_switch.bat)"; exit 4 }
 New-Item -ItemType Directory -Force $sd | Out-Null
 Copy-Item $built $nro -Force
+# The deko3d GLSL package (tools: deko3d_glsl_opt.py + deko3d_shader_package.py into out/deko3d_pkg): game data, read beside the NRO.
+$pkg = Join-Path $root "out/deko3d_pkg/deko3d_glsl.bin"
+if (Test-Path $pkg) { Copy-Item $pkg (Join-Path $sd "deko3d_glsl.bin") -Force }
 # Ryubing gives a command-line NRO no argv: the NRO then uses REX_SWITCH_FALLBACK_EXE, /switch/fc4-nx/fc4-nx.nro.
 # Its log (log_file in the toml) is copied when it is on the SD root.
 $sdRoot = Join-Path $data "sdcard"
