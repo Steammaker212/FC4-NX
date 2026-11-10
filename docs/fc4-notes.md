@@ -327,3 +327,29 @@ resolved render targets back on the CPU (Renut's renderer must support resolve r
   PC window captures (tools/fc4_window_shot.ps1, PrintWindow) come out black: unclear whether that is the D3D12
   flip-model swapchain or the image itself. Hang dumper: FC4_HANG_DUMP_S=N writes fc4_hang_dump.txt (all threads).
   Run: tools/fc4_run_pc.ps1 -Build pc_renut -Visible -Extra "--banjo_renderer=renut".
+
+## 2026-11-09: Renut PC stalls after ~80 frames (renut8 -> irq1)
+
+The window is not black from the capture: the renderer's own capture (nfsmw_captura) reports "no game image" because
+the game stops swapping at frame ~78. Causes found, in order (thread dumps: FC4_HANG_DUMP_S=N FC4_HANG_DUMP_N=k):
+
+1. **Async resource lock ring** (D3D sub_83F18B88, called once from sub_82831850): 32-slot shift register at device
+   +0x5F60; spins while bit 63 is set. Slots are freed by the game's unlock jobs (sub_838B8998 -> sub_838B8598 ->
+   sub_83F18790). trace1: frees keep pace for ~18 locks, then stop. Hook in gpu/d3d/hooks/fc4_hooks.cpp waits, running
+   ready callbacks, and after 2 s retires the oldest slot (the waits are GPU packets Renut ignores).
+   Note: direct_calls.py must be re-run (--redo) after adding a hook on a game function, or callers keep calling
+   __imp__sub_X directly and the hook never runs (the first fc4_hooks build).
+2. **GPU callbacks run inline**: the allocator's GPU-done callback sub_827B34F0 pushes onto a lock-free queue
+   (0x84239250) and spins while it is full; only the allocator (sub_827BA778) drains it. Renut ran callbacks on a game
+   thread inside its next D3D call -> deadlock. Now guest/callbacks.cpp runs them on a "GPU Interrupt" XHostThread
+   (renut_callback_thread, default on), as the console's interrupt does.
+3. **Command buffers** (open): sub_827ADB78 / sub_827EF9C0 call D3DDevice_BeginCommandBuffer 83F29B28, which calls the
+   buffer's allocation callback (+0xB0, context +0xA4) when it has no memory (+0x98); the callback is null -> FATAL
+   "invalid function 0" at lr 0x83F29AB0 (frame ~87). FC4 has no Begin/End/Run hooks (sa2-nx never needed them);
+   device.cpp's D3DDevice_*CommandBuffer_hook bodies use N&B device offsets: FC4's 0x34xx-0x3Bxx block is N&B + 0x194
+   (CommandBuffer 0x3660, 0x3BE4 = N&B 0x3A50, 0x3BD8 = 0x3A44, 0x3BD4 = 0x3A40, 0x3664.. = 0x34D0..); the tiling path
+   (flags & 3, used: flags = 1 from sub_827ADB78) touches other regions still to map. D3DCommandBuffer layout matches
+   (+0x08 fence, +0x6C flags, +0x98 memory, +0xA8 allocator size).
+   fc4_renut_async_locks = false (byte 0x84126AF8) takes the game's synchronous path, which hits the same crash sooner.
+
+Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp).

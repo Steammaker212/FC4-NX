@@ -28,8 +28,12 @@ void InsertCallback(u32 function, u32 context);
 // after it (render_thread::QueueFenceCompletion).
 uint64_t LastCallback();
 
-// Runs the callbacks the render thread has reached, in order, on this thread.
+// Runs the callbacks the render thread has reached, in order, on this thread (fc4-nx: with renut_callback_thread,
+// wakes the interrupt thread that runs them).
 void RunReadyCallbacks();
+
+// fc4-nx: the render thread reached a callback marker (wakes the interrupt thread, renut_callback_thread).
+void NotifyCallbacksReached();
 
 // banjo-nx (2026-10-20, from sa2-nx, banjo_renut_callbacks_fast): the hooks' first calls (RunReadyCallbacks, FlushDeferredVertices,
 // FlushRecordedVertices) return without their locks when nothing waits. A plain flag, set at the first call (1 on, -1

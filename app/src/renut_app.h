@@ -38,6 +38,11 @@ void Start();  // src/cpu/katamari_stage_diag.cpp
 namespace fc4::watch {
 void Start();  // src/fc4_debug_watch.cpp (fc4_watch_addr / fc4_watch_pop, PC debug, off)
 }
+#if BANJO_RENUT_RENDERER
+namespace fc4::renut {
+void BootPatches();  // renut_engine/gpu/d3d/hooks/fc4_hooks.cpp (fc4_renut_async_locks)
+}
+#endif
 #include "native/nfsmw_nativo_captura.h"
 #if !REX_PLATFORM_SWITCH
 #include "profiler/nfsmw_perfil_pc.h"
@@ -230,6 +235,9 @@ public:
         katamari::stage_diag::Start();
         // fc4-nx (2026-11-09): fc4_watch_addr / fc4_watch_pop (off): who writes a bad value (hardware breakpoint, PC).
         fc4::watch::Start();
+#if BANJO_RENUT_RENDERER
+        if (banjo::renut_gpu::Active()) fc4::renut::BootPatches();
+#endif
         // PC: function-level CPU profile (banjo_pc_profile_s = N seconds per report; 0 = off; from futari-nx).
         banjo::pc_profiler::Start();
         // Switch: per-thread CPU accounting, the optional sampler and the stall watchdog.

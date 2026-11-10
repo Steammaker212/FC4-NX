@@ -200,10 +200,18 @@ struct HangDumper {
     const char* env = std::getenv("FC4_HANG_DUMP_S");
     const int seconds = env ? std::atoi(env) : 0;
     if (seconds <= 0) return;
-    std::thread([seconds] {
+    // FC4_HANG_DUMP_N=k: k dumps 3 s apart in the same file (a thread at the same place in each is stuck there).
+    const char* n_env = std::getenv("FC4_HANG_DUMP_N");
+    const int count = n_env && std::atoi(n_env) > 1 ? std::atoi(n_env) : 1;
+    std::thread([seconds, count] {
       std::this_thread::sleep_for(std::chrono::seconds(seconds));
       if (FILE* out = std::fopen("fc4_hang_dump.txt", "w")) {
-        DumpAllThreads(out);
+        for (int i = 0; i < count; ++i) {
+          if (i) std::this_thread::sleep_for(std::chrono::seconds(3));
+          std::fprintf(out, "=== dump %d\n", i + 1);
+          DumpAllThreads(out);
+          std::fflush(out);
+        }
         std::fclose(out);
       }
     }).detach();

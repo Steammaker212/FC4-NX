@@ -1,6 +1,7 @@
 /**
  * @file    gpu/backend/render_thread.cpp
  */
+#include "renut_engine/gpu/guest/callbacks.h"  // fc4-nx: NotifyCallbacksReached
 #include "renut_engine/gpu/backend/render_thread.h"
 
 #include <algorithm>
@@ -302,6 +303,7 @@ void QueueCallbackMarker(uint64_t seq) {
     }
     if (wake)
       g_done_cv.notify_all();
+    NotifyCallbacksReached();  // fc4-nx: the interrupt thread (guest/callbacks.cpp, renut_callback_thread)
   });
 }
 
