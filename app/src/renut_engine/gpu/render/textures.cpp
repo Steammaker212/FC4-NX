@@ -27,6 +27,13 @@
 #include "renut_engine/gpu/render/graphics_options.h"
 #include "renut_engine/gpu/backend/video.h"
 
+#include <rex/cvar.h>
+
+REXCVAR_DEFINE_BOOL(banjo_renut_resolve_any_size, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-10): a resolve destination keeps its image for a fetch of the same memory, format and "
+                    "dimension at another size or pitch (Far Cry 4's dynamic resolution resolves into one texture at a "
+                    "new size most frames). false: only the same size, as before (blocks and tiles in FC4's gameplay)");
+
 namespace renut::gpu {
 
 namespace {
@@ -68,6 +75,8 @@ std::unique_ptr<HostTexture> &TextureSlot(u32 texture_va) {
   memo = {texture_va, &slot};
   return slot;
 }
+// fc4-nx (2026-11-10): the g_textures key of a resolve destination by its base page (ResolveTarget).
+constexpr u32 ResolveSlotKey(u32 base_page) { return 0xF0000000u | (base_page & 0x0FFFFFFFu); }
 // Depth resolve destinations with guest words, by base address (4 KB pages).
 std::unordered_map<u32, HostTexture *> g_depth_words;
 // The last resolve destination into each base address (4 KB pages): D3D
@@ -674,6 +683,18 @@ bool SameData(const u32 a[6], const u32 b[6]) {
   return a[1] == b[1] && a[2] == b[2] && (a[5] & kDimensionMask) == (b[5] & kDimensionMask);
 }
 
+// fc4-nx (2026-11-10, banjo_renut_resolve_any_size): the same memory, format and dimension, any size or pitch. Far Cry 4
+// changes its render resolution almost every frame (1280x704, 960x608, 960x576 ...: its dynamic resolution) and resolves
+// into the same texture with that frame's size, while the header it samples through may already carry the next frame's.
+// SameData dropped the resolve's image for each such fetch and made the texture from guest memory, which the resolve
+// never wrote: the console's gameplay and the hood scene came out as blocks and green/magenta tiles (hw1). What the GPU
+// last wrote there is the right content; the size difference lasts a frame.
+bool SameResolvedMemory(const u32 a[6], const u32 b[6]) {
+  constexpr u32 kDimensionMask = 0x600u;
+  return REXCVAR_GET(banjo_renut_resolve_any_size) && a[1] == b[1] &&
+         (a[5] & kDimensionMask) == (b[5] & kDimensionMask);
+}
+
 // The resolve destination another header wrote this texture's memory through,
 // when it holds the same data (SameData). Only the GPU has what the resolve
 // wrote.
@@ -682,9 +703,16 @@ HostTexture *ResolvedAlias(u32 texture_va, const TextureFetch &fetch, const u32 
   if (it == g_resolve_targets.end())
     return nullptr;
   HostTexture *resolved = it->second;
-  if (resolved->guest_va == texture_va || !resolved->texture)
+  if (!resolved->texture)
     return nullptr;
-  return SameData(resolved->desc, desc) ? resolved : nullptr;
+  // The header's own slot answers for itself (the old one-slot-per-header destinations); a destination kept by base
+  // page (fc4-nx, ResolveSlotKey) is never that slot, so the same header samples it here.
+  if (resolved->guest_va == texture_va) {
+    auto own = g_textures.find(texture_va);
+    if (own != g_textures.end() && own->second.get() == resolved)
+      return nullptr;
+  }
+  return SameData(resolved->desc, desc) || SameResolvedMemory(resolved->desc, desc) ? resolved : nullptr;
 }
 
 // The depth resolve whose words a texture described by 'fetch' reads: a
@@ -699,7 +727,11 @@ HostTexture *DepthWordsSource(const TextureFetch &fetch) {
   HostTexture *source = it->second;
   u32 width, height, depth;
   fetch.Size(width, height, depth);
-  if (!source->words || source->width != width || source->height != height)
+  // fc4-nx (2026-11-10, banjo_renut_resolve_any_size): Far Cry 4 samples its depth resolve (1280x704 at that frame's
+  // resolution) through a header of another size (1280x720); made from guest memory instead, the depth the post
+  // effects read was garbage.
+  if (!source->words || ((source->width != width || source->height != height) &&
+                         !REXCVAR_GET(banjo_renut_resolve_any_size)))
     return nullptr;
   return source;
 }
@@ -747,7 +779,9 @@ void CopyDepthWords(HostTexture &t, HostTexture &source) {
   plume::RenderCommandList *cmd = State().command_list;
   TransitionTextureLocked(source.words.get(), plume::RenderTextureLayout::COPY_SOURCE);
   TransitionTextureLocked(&t, plume::RenderTextureLayout::COPY_DEST);
-  const plume::RenderBox box(0, 0, int32_t(t.scale.Size(t.width)), int32_t(t.scale.Size(t.height)));
+  // fc4-nx (2026-11-10): the smaller of the two (a fetch may be of another size than the resolve, DepthWordsSource).
+  const plume::RenderBox box(0, 0, int32_t(std::min(t.scale.Size(t.width), source.words->alloc_width)),
+                             int32_t(std::min(t.scale.Size(t.height), source.words->alloc_height)));
   t.resolve_signature = 0;  // banjo-nx (banjo_renut_resolve_skip)
   cmd->copyTextureRegion(plume::RenderTextureCopyLocation::Subresource(t.texture.get(), 0, 0),
                          plume::RenderTextureCopyLocation::Subresource(source.words->texture.get()),
@@ -776,7 +810,13 @@ HostTexture *ResolveTarget(u32 texture_va, plume::RenderFormat format, RenderSca
   u32 desc[6];
   MaskedDesc(fetch, desc);
 
-  auto &slot = TextureSlot(texture_va);
+  // fc4-nx (2026-11-10, banjo_renut_resolve_any_size): one destination per base address, not per header. Far Cry 4
+  // resolves through one header into memory that moves with its dynamic resolution (base 0x133FC, 0x133E8, 0x133B6 ...)
+  // and its temporal passes sample the previous frame's at its own base; one slot per header threw that image away at
+  // each new resolve (the hood scene's green and magenta tiles, the compound's blocks). A key no header VA uses
+  // (0xF0000000 and up: base pages are 20 bits), so eviction, the memory report and Retire see these entries as before.
+  const bool by_base = REXCVAR_GET(banjo_renut_resolve_any_size);
+  auto &slot = TextureSlot(by_base ? ResolveSlotKey(fetch.BasePage()) : texture_va);
   // banjo-nx (2026-10-28, night_gpu5, dynamic resolution steps): a destination of a settable code made at another
   // height of it (render/surfaces.cpp CodeForHeightLocked) is made again: its size is the old height's.
   if (slot && (!slot->render_target || std::memcmp(slot->desc, desc, sizeof(desc)) != 0 ||
@@ -1223,7 +1263,7 @@ TextureBinding BindTextureLocked(u32 texture_va, const TextureFetch &device_fetc
   // its header only in fields that leave the data alone (the mip range, say)
   // keeps what the resolve wrote.
   if (slot && std::memcmp(slot->desc, desc, sizeof(desc)) != 0 &&
-      !(slot->gpu_written && SameData(slot->desc, desc))) {
+      !(slot->gpu_written && (SameData(slot->desc, desc) || SameResolvedMemory(slot->desc, desc)))) {
     // banjo-nx (2026-10-18, the one-frame colour flashes): a texture only the GPU has the content of, thrown away for a
     // fetch constant that reads the memory otherwise; the new one is filled from guest memory, which the resolve never
     // wrote (zero: green through the game's colour encoding on deko3d; stale on Vulkan).

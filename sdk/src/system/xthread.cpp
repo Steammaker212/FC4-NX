@@ -9,6 +9,7 @@
  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
  */
 
+#include <cstdio>
 #include <algorithm>
 #include <atomic>
 #include <cstring>
@@ -196,6 +197,17 @@ void XThread::set_name(const std::string_view name) {
     // One the thread is ready it will handle it.
     thread_->set_name(thread_name_);
   }
+#if REX_PLATFORM_SWITCH
+  // fc4-nx (2026-11-10): Far Cry 4's audio engine thread ("Dare::AudioRenderer", ~2 % of a core: it sleeps between
+  // blocks) one step above the guest band. At 0x3B it waited behind ~10 busy game threads' 10 ms slices and the audio
+  // ran dry when the frame rate dropped (rex_profile.log: 107 requests without data in 10 s at 15 fps; the user heard
+  // static in the menus). It names itself, so the change is made on its own thread.
+  if (guest_thread_ && name.starts_with("Dare::Audio") && IsInThread(this)) {
+    RexSwitchSetCurrentThreadPriority(REX_SWITCH_PRIO_GUEST - 1);
+    std::fprintf(stderr, "[threads] %s: priority 0x%X (the audio engine above the game threads)\n",
+                 thread_name_.c_str(), REX_SWITCH_PRIO_GUEST - 1);
+  }
+#endif
 }
 
 static uint8_t next_cpu = 0;

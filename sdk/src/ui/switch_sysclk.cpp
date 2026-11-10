@@ -404,10 +404,43 @@ void Enable(bool enabled) {
   }
 }
 
+/*
+ * fc4-nx (2026-11-10, the player's fc4_clock_cpu_mhz / fc4_clock_gpu_mhz): the CPU and GPU held at these clocks for the
+ * session through sys-clk's override (command 8), the way its overlay's sliders do; released on a clean exit (OnExit)
+ * like the Reverse-NX override. On the console Far Cry 4's renderer thread took ~45 ms a frame and the GPU ~32 ms at the
+ * stock handheld 1020 / 460.8 MHz: 1785 MHz (the CPU boost clock games use while loading) and 768 MHz (the docked GPU
+ * clock) bring both under 33 ms. Nothing happens without sys-clk (or a fork) installed: the log says so.
+ */
+void Force(uint32_t cpu_mhz, uint32_t gpu_mhz) {
+  if (!cpu_mhz && !gpu_mhz) {
+    return;
+  }
+  if (!Open()) {
+    std::fprintf(stderr, "[clocks] fc4_clock_*: no sys-clk sysmodule answers: the clocks stay the system's\n");
+    return;
+  }
+  const uint32_t hz[2] = {cpu_mhz * 1000000u, gpu_mhz * 1000000u};
+  Result rc[2] = {0, 0};
+  for (unsigned m = 0; m < 2; ++m) {
+    if (hz[m]) {
+      rc[m] = PutOverride(m, hz[m]);
+      if (R_SUCCEEDED(rc[m])) {
+        g_set[m] = true;
+      }
+    }
+  }
+  std::fprintf(stderr, "[clocks] fc4_clock_*: CPU %u MHz (0x%X), GPU %u MHz (0x%X) held by sys-clk until exit\n",
+               cpu_mhz, unsigned(rc[0]), gpu_mhz, unsigned(rc[1]));
+}
+
 }  // namespace rex::ui::switch_sysclk
 
 extern "C" void RexSwitchClocksReverseEnable(int enabled) {
   rex::ui::switch_sysclk::Enable(enabled != 0);
+}
+
+extern "C" void RexSwitchClocksForce(unsigned cpu_mhz, unsigned gpu_mhz) {
+  rex::ui::switch_sysclk::Force(cpu_mhz, gpu_mhz);
 }
 
 #endif  // REX_PLATFORM_SWITCH

@@ -451,3 +451,27 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   fence does not signal in 2 s. Hang suspects: vs_26DE92239ADAE756 / vs_F33E59F6A6DE49DD divide by repeated
   subtraction (`for (uint x = r; x >= d; ) x -= d;`, d = max(v[65].y, 1) + 1: a loop for ever only if the
   tessellation factor is 0xFFFFFFFF).
+
+## Console runs hw1/hw2 (2026-11-10, the user's Atmosphere Switch)
+- **Runs on the console** (title takeover, NRO + deko3d_glsl.bin + deko3d_shaders.bin + game_root on the SD): title,
+  menus, New Game, the KYRAT load, the bus intro and the Pagan Min scene drawn right at 15-17 fps. Ryubing's three
+  limits do not apply. Album files of an emuMMC are in `sdmc:/emuMMC/SD00/Nintendo/Album`.
+- **Broken: the hood scene (green/magenta tiles) and De Pleur's compound (blocks).** FC4 resolves through one header
+  into memory that moves with its dynamic resolution (bases 0x133FC, 0x133E8, 0x133B6 ... for 1280x704, 1280x672,
+  960x608 ...) and its temporal passes sample the previous frame's at its own base. ResolveTarget kept one host texture
+  per header and retired it at each new base; BindTextureLocked then made the texture from guest memory the resolve
+  never wrote ("[flash] ... dropped for a fetch of other data": 126 a run). Now (banjo_renut_resolve_any_size, on):
+  resolve destinations by base page (a synthetic g_textures key, 0xF0000000 | page), ResolvedAlias accepts one held
+  under that key for the same header, a fetch of the same memory/format/dimension at another size keeps the image, and
+  a depth resolve sampled at another size (1280x720 over 1280x704) uses its words (copy box clamped). PC: [flash]
+  139 -> 4 per run.
+- **Speed (hw2 rex_profile.log, handheld):** clocks CPU 1020 / GPU 460.8 / EMC 1331 (apm 0x92220008); gameplay 13-15
+  fps with the game thread at ~61 ms a frame, the render thread ~45 ms (~720 draws, 95 MB/s of vertex fetch copies,
+  9 % of draws through the address window) and the GPU ~32 ms. `fc4_clock_cpu_mhz` / `fc4_clock_gpu_mhz` (default
+  1785 / 768, src/fc4_switch_settings.cpp) hold the clocks through sys-clk's override (sdk switch_sysclk.cpp Force),
+  released at a clean exit.
+- **Audio static:** at 15 fps 107 audio requests without data in 10 s. FC4's `Dare::AudioRenderer` thread (~2 % of a
+  core) waited at the guest priority (0x3B, 10 ms slices) behind ~10 busy threads: it now goes to 0x3A when it names
+  itself (xthread.cpp set_name). The menus also mix about twice the usual blocks a second (two clients).
+- Still to do: the texture fetch exponent adjust (650 binds; shader_common.h tfetch* and draw.cpp BindingWords, index
+  bits 20-25 are free: 8192 slots), the 322 Fog/PointSize vertex shaders, the vertex-copy cost (address window).

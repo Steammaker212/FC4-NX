@@ -63,10 +63,13 @@ REXCVAR_DECLARE(bool, banjo_gpu_boost);
 REXCVAR_DECLARE(bool, banjo_renut_linked_stages);  // renut_engine/gpu/banjo_renut_tuning.cpp
 #endif
 REXCVAR_DECLARE(bool, banjo_gpu_zcull_greater);
+REXCVAR_DECLARE(int32_t, fc4_clock_cpu_mhz);  // src/fc4_switch_settings.cpp
+REXCVAR_DECLARE(int32_t, fc4_clock_gpu_mhz);
 #if REX_PLATFORM_SWITCH
 extern "C" {
 void RexSwitchApmRequestGpuMhz(int mhz);  // sdk/src/ui/switch_apm.cpp
 void RexSwitchApmApply(void);
+void RexSwitchClocksForce(unsigned cpu_mhz, unsigned gpu_mhz);  // sdk/src/ui/switch_sysclk.cpp
 }
 #endif
 
@@ -191,6 +194,8 @@ public:
             RexSwitchApmRequestGpuMhz(460);
             RexSwitchApmApply();
         }
+        // fc4-nx (2026-11-10): Far Cry 4's clocks held through sys-clk (fc4_clock_cpu_mhz / fc4_clock_gpu_mhz).
+        RexSwitchClocksForce(unsigned(REXCVAR_GET(fc4_clock_cpu_mhz)), unsigned(REXCVAR_GET(fc4_clock_gpu_mhz)));
 #endif
 #if BANJO_RENUT_RENDERER
         if (banjo::renut_gpu::Active()) {
