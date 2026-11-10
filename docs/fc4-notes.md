@@ -521,3 +521,9 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
 - `banjo_renut_diag_show_texture` takes a list shown 10 s each, and "R<n>" = the previous frame's n-th resolve's
   destination (logged as "[diag] show texture"); resolve destinations held by base page are found by a walk.
 - Launch PC runs from Bash: from PowerShell, `-Extra` reaches fc4_run_pc.ps1 cut at the first space.
+
+## To do: New Game load time (the user's request, 2026-11-10)
+- The KYRAT load after New Game takes ~2-2.5 min on the console (hw2 fc4.log: 131 s with no frame stats between
+  02:25:22 and 02:27:33); the hw3 test (switch_profile_stacks on, threads spread by Xbox core) felt longer. To
+  measure from hw3's rex_profile.log stacks: which threads run during the load and where (SD reads, the vfs/range
+  cache, decompression, shader or texture creation), then cut it.
