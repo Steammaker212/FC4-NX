@@ -71,6 +71,10 @@ REXCVAR_DEFINE_BOOL(banjo_renut_resolve_fixed_clamp_signed, true, "Banjo/Renut",
                     "(FC4's 64x64 16_16 luminance); false: those copied as before, the bias at the bind");
 REXCVAR_DEFINE_INT32(banjo_renut_diag_skip_depth_only, 0, "Banjo/Diagnostics",
                      "fc4-nx (2026-11-10): depth-only draws into depth targets of this width are not drawn (0: off)");
+REXCVAR_DEFINE_BOOL(banjo_renut_diag_trace_probes, true, "Banjo/Diagnostics",
+                    "fc4-nx (2026-11-11): with banjo_renut_diag_resolve_trace, a traced frame's full-width colour "
+                    "resolves are each sampled (a 96x64 patch at the centre, read back) and their mean and jitter "
+                    "logged: which traced frames were noise frames, and from which resolve");
 REXCVAR_DEFINE_STRING(banjo_renut_diag_snapshot, "", "Banjo/Diagnostics",
                       "fc4-nx (2026-11-10): '<pixel shader hash>:<fetch slot>': copy that slot's texture at the first "
                       "draw of that shader each frame (banjo_renut_diag_show_texture SNAP shows it)");
@@ -91,6 +95,11 @@ REXCVAR_DEFINE_INT32(banjo_renut_resolve_readback_texels, 4096, "Banjo/Renut",
                      "memory three frames later, in the destination's format, tiling and endianness, for games that read "
                      "them with the CPU (the last finished one of each kind goes into each new destination at its resolve). 0: off")
     .range(0, 1 << 22);
+REXCVAR_DEFINE_BOOL(banjo_renut_resolve_readback_any_size, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-11, the console's white picture): a destination of a size no readback has finished "
+                    "for yet gets the newest of its formats and width, resampled. FC4's dynamic resolution "
+                    "changes its luminance grid between 80x44, 80x42 and 80x40 on the console: by size, a new size had "
+                    "no readback and the CPU read what the memory held, and the exposure ran away. false: same size only");
 REXCVAR_DEFINE_BOOL(banjo_renut_resolve_integer_fetch, true, "Banjo/Renut",
                     "fc4-nx (2026-11-10): a biased resolve of a 16_16 fixed target into a texture fetched as integers "
                     "keeps value x 2^bias unclamped (Far Cry 4's height map)");
@@ -10012,12 +10021,14 @@ bool DrawStateLocked(const u8 *device_state, const DrawCall &call, const ReplayC
     __builtin_prefetch(declaration);
   if (!vs || !declaration) {
     static uint32_t logged = 0;
-    if (LogLimited(logged, 16)) {
+    static uint64_t dropped = 0;  // fc4-nx (2026-11-11): and at each power of two after, with the count
+    ++dropped;
+    if (LogLimited(logged, 16) || (dropped > 16 && (dropped & (dropped - 1)) == 0)) {
       const u32 va = vs ? declaration_va : vs_va;
       const auto *words = GuestPtr<const be_u32>(va);
-      RGPU_WARN("Draw dropped: {} {:08X} is not one the renderer knows (words {:08X} {:08X})",
+      RGPU_WARN("Draw dropped: {} {:08X} is not one the renderer knows (words {:08X} {:08X}; {} dropped so far)",
                 vs ? "vertex declaration" : "vertex shader", va, words ? u32(words[0]) : 0,
-                words ? u32(words[1]) : 0);
+                words ? u32(words[1]) : 0, dropped);
     }
     return false;
   }
@@ -12433,8 +12444,10 @@ struct LatestReadback {
   u32 w = 0, h = 0, guest_format = 0;
   plume::RenderFormat host_format = plume::RenderFormat::UNKNOWN;
   std::vector<uint8_t> texels;
+  uint64_t seq = 0;  // fc4-nx (2026-11-11): order of finishing (banjo_renut_resolve_readback_any_size)
 };
 std::unordered_map<uint64_t, LatestReadback> g_readback_latest;
+uint64_t g_readback_seq = 0;
 uint64_t ReadbackKey(u32 w, u32 h, u32 guest_format, plume::RenderFormat host_format) {
   return (uint64_t(w) << 48) | (uint64_t(h) << 32) | (uint64_t(guest_format) << 16) | uint64_t(u32(host_format));
 }
@@ -12533,20 +12546,23 @@ void ReadbackTexel(plume::RenderFormat host, u32 guest, const uint8_t *in, uint8
 }
 
 // Puts a finished readback's texels into a destination's guest memory as the guest's resolve leaves them.
-void PlaceReadbackLocked(const LatestReadback &l, u32 base, u32 pitch_texels, bool tiled, u32 endian, u32 x0, u32 y0) {
+// fc4-nx (2026-11-11): into a w x h rect; a readback of another size is resampled (nearest texel).
+void PlaceReadbackLocked(const LatestReadback &l, u32 base, u32 pitch_texels, bool tiled, u32 endian, u32 x0, u32 y0,
+                         u32 w, u32 h) {
   const uint32_t host_bytes = ReadbackHostBytes(l.host_format);
   const uint32_t guest_bytes = ReadbackGuestBytes(l.host_format, l.guest_format);
-  if (!guest_bytes || l.texels.size() < size_t(l.w) * l.h * host_bytes)
+  if (!guest_bytes || !l.w || !l.h || !w || !h || l.texels.size() < size_t(l.w) * l.h * host_bytes)
     return;
   const uint32_t log2_bytes = uint32_t(std::countr_zero(guest_bytes));
-  std::vector<uint8_t> row(size_t(l.w) * guest_bytes);
-  for (u32 y = 0; y < l.h; ++y) {
-    const uint8_t *in = l.texels.data() + size_t(y) * l.w * host_bytes;
-    for (u32 x = 0; x < l.w; ++x)
-      ReadbackTexel(l.host_format, l.guest_format, in + size_t(x) * host_bytes, row.data() + size_t(x) * guest_bytes);
+  std::vector<uint8_t> row(size_t(w) * guest_bytes);
+  for (u32 y = 0; y < h; ++y) {
+    const uint8_t *in = l.texels.data() + size_t(uint64_t(y) * l.h / h) * l.w * host_bytes;
+    for (u32 x = 0; x < w; ++x)
+      ReadbackTexel(l.host_format, l.guest_format, in + size_t(uint64_t(x) * l.w / w) * host_bytes,
+                    row.data() + size_t(x) * guest_bytes);
     SwapEndian(endian, row.data(), row.data(), row.size());
     const u32 gy = y0 + y;
-    for (u32 x = 0; x < l.w; ++x) {
+    for (u32 x = 0; x < w; ++x) {
       const u32 gx = x0 + x;
       const u32 offset = tiled ? TiledOffset2D(gx, gy, pitch_texels, log2_bytes) : (gy * pitch_texels + gx) * guest_bytes;
       if (uint8_t *dst = GuestPhysicalPtr<uint8_t>(base + offset))
@@ -12554,6 +12570,149 @@ void PlaceReadbackLocked(const LatestReadback &l, u32 base, u32 pitch_texels, bo
     }
   }
   ++g_readbacks_written;
+}
+
+// fc4-nx (2026-11-11, diagnostic, banjo_renut_diag_resolve_trace): a traced frame's full-width colour resolves each get
+// a 96x64 patch at their centre read back; three frames later its mean and its jitter (mean step between horizontal
+// neighbours, over R, G and B) are logged. The console's noise frames (raw bits shown as colour) have a jitter near the
+// mean; a clean picture's is well below it. Says which traced frames were noisy, and in which resolve it starts.
+struct TraceProbe {
+  std::unique_ptr<plume::RenderBuffer> buffer;
+  uint64_t frame = 0;
+  plume::RenderFormat format = plume::RenderFormat::UNKNOWN;
+  u32 page = 0, guest_format = 0, order = 0;
+  bool pending = false;
+};
+constexpr u32 kTraceProbes = 12, kProbeW = 96, kProbeH = 64, kProbeRow = 128;
+TraceProbe g_trace_probes[kTraceProbes];
+uint64_t g_trace_probe_frame = ~0ull;
+u32 g_trace_probe_count = 0;
+bool g_trace_probe_pending = false;
+
+void DecodeProbeTexel(plume::RenderFormat format, const uint8_t *t, float c[3]) {
+  switch (format) {
+  case plume::RenderFormat::R16G16B16A16_FLOAT: {
+    uint16_t h[4];
+    std::memcpy(h, t, 8);
+    for (int k = 0; k < 3; ++k)
+      c[k] = HalfToFloat(h[k]);
+    break;
+  }
+  case plume::RenderFormat::R16G16B16A16_UNORM: {
+    uint16_t h[4];
+    std::memcpy(h, t, 8);
+    for (int k = 0; k < 3; ++k)
+      c[k] = h[k] / 65535.0f;
+    break;
+  }
+  case plume::RenderFormat::R16G16_FLOAT: {
+    uint16_t h[2];
+    std::memcpy(h, t, 4);
+    c[0] = HalfToFloat(h[0]);
+    c[1] = HalfToFloat(h[1]);
+    c[2] = 0.0f;
+    break;
+  }
+  case plume::RenderFormat::R32_FLOAT:
+    std::memcpy(c, t, 4);
+    c[1] = c[2] = 0.0f;
+    break;
+  default:
+    for (int k = 0; k < 3; ++k)
+      c[k] = t[k] / 255.0f;
+    break;
+  }
+}
+
+void TraceProbeReportLocked() {
+  const uint64_t now = TextureFrameLocked();
+  bool any = false;
+  for (TraceProbe &p : g_trace_probes) {
+    if (!p.pending)
+      continue;
+    if (now < p.frame + 3) {
+      any = true;
+      continue;
+    }
+    p.pending = false;
+    const uint32_t bytes = ReadbackHostBytes(p.format);
+    const auto *data = static_cast<const uint8_t *>(p.buffer->map());
+    if (!data)
+      continue;
+    double sum = 0.0, jitter = 0.0;
+    uint64_t n = 0, m = 0, bad = 0;
+    for (u32 y = 0; y < kProbeH; ++y) {
+      float prev[3] = {};
+      for (u32 x = 0; x < kProbeW; ++x) {
+        float c[3];
+        DecodeProbeTexel(p.format, data + (size_t(y) * kProbeRow + x) * bytes, c);
+        for (int k = 0; k < 3; ++k) {
+          if (!std::isfinite(c[k])) {
+            ++bad;
+            c[k] = 0.0f;
+          }
+          sum += c[k];
+          ++n;
+          if (x) {
+            jitter += std::fabs(c[k] - prev[k]);
+            ++m;
+          }
+          prev[k] = c[k];
+        }
+      }
+    }
+    p.buffer->unmap();
+    const double mean = n ? sum / double(n) : 0.0, jit = m ? jitter / double(m) : 0.0;
+    RGPU_INFO("[trace] probe of frame {} resolve #{} into page {:05X} (fetch format {}, host {}): mean {:.4f}, jitter "
+              "{:.4f} ({:.0f} % of the mean){}", p.frame, p.order, p.page, p.guest_format, u32(p.format), mean, jit,
+              mean > 0.0 ? 100.0 * jit / mean : 0.0, bad ? fmt::format(", {} not finite", bad) : std::string());
+  }
+  g_trace_probe_pending = any;
+}
+
+void TraceProbeResolveLocked(HostTexture *dest, const d3d::TextureFetchConstant *dest_format) {
+  static const bool on = REXCVAR_GET(banjo_renut_diag_trace_probes);
+  if (!on || !dest || !dest->texture || !dest_format || dest->width < 640 || dest->height < 128 ||
+      dest->dimension != TextureDimension::Tex2D || dest->stacked)
+    return;
+  const uint64_t frame = TextureFrameLocked();
+  if (g_trace_probe_frame != frame) {
+    g_trace_probe_frame = frame;
+    g_trace_probe_count = 0;
+  }
+  const u32 order = g_trace_probe_count++;
+  TraceProbe *slot = nullptr;
+  for (TraceProbe &p : g_trace_probes) {
+    if (!p.pending) {
+      slot = &p;
+      break;
+    }
+  }
+  if (!slot)
+    return;
+  auto &s = State();
+  if (!slot->buffer)
+    slot->buffer = s.device->createBuffer(plume::RenderBufferDesc::ReadbackBuffer(uint64_t(kProbeRow) * kProbeH * 8));
+  if (!slot->buffer || !s.command_list)
+    return;
+  const u32 hw = dest->alloc_width ? dest->alloc_width : dest->width;
+  const u32 hh = dest->alloc_height ? dest->alloc_height : dest->height;
+  const int32_t x0 = int32_t(hw / 2 - kProbeW / 2), y0 = int32_t(hh / 2 - kProbeH / 2);
+  TransitionTextureLocked(dest, plume::RenderTextureLayout::COPY_SOURCE);
+  const plume::RenderBox box(x0, y0, x0 + int32_t(kProbeW), y0 + int32_t(kProbeH));
+  s.command_list->copyTextureRegion(
+      plume::RenderTextureCopyLocation::PlacedFootprint(slot->buffer.get(), dest->host_format, kProbeW, kProbeH, 1,
+                                                        kProbeRow),
+      plume::RenderTextureCopyLocation::Subresource(dest->texture.get(), 0, 0), 0, 0, 0, &box);
+  TransitionTextureLocked(dest, plume::RenderTextureLayout::SHADER_READ);
+  const TextureFetch fetch = TextureFetch::FromHeader(*dest_format);
+  slot->frame = frame;
+  slot->format = dest->host_format;
+  slot->page = fetch.BasePage();
+  slot->guest_format = u32(fetch.Format());
+  slot->order = order;
+  slot->pending = true;
+  g_trace_probe_pending = true;
 }
 
 // A readback whose frame has passed becomes its kind's latest.
@@ -12568,6 +12727,7 @@ void StoreReadbackLocked(ResolveReadback &r) {
   l.guest_format = r.guest_format;
   l.host_format = r.host_format;
   l.texels.resize(size_t(r.w) * r.h * host_bytes);
+  l.seq = ++g_readback_seq;
   for (u32 y = 0; y < r.h; ++y)
     std::memcpy(l.texels.data() + size_t(y) * r.w * host_bytes, data + size_t(y) * r.row_texels * host_bytes,
                 size_t(r.w) * host_bytes);
@@ -12700,9 +12860,24 @@ void QueueResolveReadbackLocked(HostTexture *dest, const d3d::TextureFetchConsta
   // taken the work, before the host GPU has run it: the last finished readback of this kind goes into the new
   // destination now (a few frames old; Far Cry 4 reads its 80x44 luminance grid every frame from a new page, and its
   // auto-exposure climbed toward its maximum on zeros: the white picture). Old destinations are never written late.
+  const LatestReadback *latest = nullptr;
   if (auto it = g_readback_latest.find(ReadbackKey(w, h, guest_format, dest->host_format));
       it != g_readback_latest.end())
-    PlaceReadbackLocked(it->second, r.base, r.pitch_texels, r.tiled, r.endian, r.x, r.y);
+    latest = &it->second;
+  static const bool any_size = REXCVAR_GET(banjo_renut_resolve_readback_any_size);
+  if (any_size && !latest) {  // fc4-nx (2026-11-11): none of this size yet: the newest of these formats and width
+    // (FC4's luminance grid is 80 wide at any height; its other CPU-read 16_16_FLOAT resolves, 60 wide, stay apart)
+    for (const auto &[key, l] : g_readback_latest)
+      if (l.w == w && l.guest_format == guest_format && l.host_format == dest->host_format &&
+          (!latest || l.seq > latest->seq))
+        latest = &l;
+    static uint32_t resized = 0;
+    if (latest && (latest->w != w || latest->h != h) && resized++ < 8)
+      RGPU_INFO("[renut] resolve readback: {}x{} destination given the newest readback, {}x{}, resampled "
+                "(banjo_renut_resolve_readback_any_size)", w, h, latest->w, latest->h);
+  }
+  if (latest)
+    PlaceReadbackLocked(*latest, r.base, r.pitch_texels, r.tiled, r.endian, r.x, r.y, w, h);
   static uint32_t logged = 0;
   if (logged++ < 8)
     RGPU_INFO("[renut] resolve readback: {}x{} at ({},{}) of page {:05X} (guest format {}, host {}, {}tiled, endian {}) "
@@ -12728,6 +12903,8 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
     return;
   if (!g_readbacks.empty())
     FlushResolveReadbacksLocked();  // fc4-nx (2026-11-10, banjo_renut_resolve_readback)
+  if (g_trace_probe_pending)
+    TraceProbeReportLocked();  // fc4-nx (2026-11-11, banjo_renut_diag_trace_probes)
   if (REXCVAR_GET(banjo_renut_diag_cpu_reads))
     ReportCpuReadsLocked();
 
@@ -12930,6 +13107,8 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
         TransitionTextureLocked(dest, plume::RenderTextureLayout::SHADER_READ);
         if (dest_level == 0 && slice == 0 && z == 0)  // fc4-nx (2026-11-10, banjo_renut_resolve_readback)
           QueueResolveReadbackLocked(dest, dest_format, dest_rect, host_x, host_y, dest_x, dest_y, surface->scale);
+        if (banjo::renut_gpu::ResolveTraceOn() && dest_level == 0 && slice == 0 && z == 0)
+          TraceProbeResolveLocked(dest, dest_format);  // fc4-nx (2026-11-11, banjo_renut_diag_trace_probes)
         static const auto watch_start = std::chrono::steady_clock::now();
         if (REXCVAR_GET(banjo_renut_diag_cpu_reads) && dest_format &&  // fc4-nx (2026-11-10, diagnostic)
             std::chrono::steady_clock::now() - watch_start >

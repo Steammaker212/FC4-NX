@@ -34,6 +34,13 @@ REXCVAR_DEFINE_BOOL(banjo_renut_resolve_any_size, true, "Banjo/Renut",
                     "fc4-nx (2026-11-10): a resolve destination keeps its image for a fetch of the same memory, format and "
                     "dimension at another size or pitch (Far Cry 4's dynamic resolution resolves into one texture at a "
                     "new size most frames). false: only the same size, as before (blocks and tiles in FC4's gameplay)");
+REXCVAR_DEFINE_BOOL(banjo_renut_resolve_format_slots, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-11): page-keyed resolve destinations are kept per texture format, and a texture "
+                    "whose page last took a resolve of another format samples its own format's destination there");
+REXCVAR_DEFINE_BOOL(banjo_renut_depth_words_supersede, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-11): a colour resolve into a page drops the depth words a depth resolve registered "
+                    "for it (the memory now holds the colour; the console's noise frames look like depth words sampled "
+                    "as colour)");
 
 namespace renut::gpu {
 
@@ -77,7 +84,16 @@ std::unique_ptr<HostTexture> &TextureSlot(u32 texture_va) {
   return slot;
 }
 // fc4-nx (2026-11-10): the g_textures key of a resolve destination by its base page (ResolveTarget).
-constexpr u32 ResolveSlotKey(u32 base_page) { return 0xF0000000u | (base_page & 0x0FFFFFFFu); }
+// fc4-nx (2026-11-11, the console's noise frames and white-outs): and by its texture format. On the console FC4's
+// dynamic resolution moves its resolves every few frames, and destinations of different formats came to share a page
+// (the 640x352 bright-pass mask, format 26, and an 8_8_8_8 image): each resolve retired the other's image, and the next
+// sample of the first was made from guest memory (14 "[flash]" lines in hw12; none on PC, which keeps its resolution).
+// Base pages are 20 bits, the format 6: a key no header VA uses (0xF0000000 and up).
+u32 ResolveSlotKey(u32 base_page, u32 format) {
+  static const bool by_format = REXCVAR_GET(banjo_renut_resolve_format_slots);
+  return by_format ? 0xF0000000u | ((format & 0x3Fu) << 20) | (base_page & 0xFFFFFu)
+                   : 0xF0000000u | (base_page & 0x0FFFFFFFu);
+}
 // Depth resolve destinations with guest words, by base address (4 KB pages).
 std::unordered_map<u32, HostTexture *> g_depth_words;
 // The last resolve destination into each base address (4 KB pages): D3D
@@ -711,6 +727,26 @@ HostTexture *ResolvedAlias(u32 texture_va, const TextureFetch &fetch, const u32 
   if (it == g_resolve_targets.end())
     return nullptr;
   HostTexture *resolved = it->second;
+  // fc4-nx (2026-11-11): the page's last destination is of another format: this format's own destination there, if
+  // it holds what this header describes (ResolveSlotKey). Not when the page's last is a depth resolve whose words are
+  // registered there: FC4 samples its depth resolves as 8_8_8_8, and an older colour resolve of that format at the page
+  // is not what it reads (PC run pcslot1: fog and lighting from colour as depth, a red tint and white blow-outs).
+  static const bool by_format = REXCVAR_GET(banjo_renut_resolve_format_slots);
+  const auto words = g_depth_words.find(fetch.BasePage());
+  const bool depth_last = words != g_depth_words.end() && words->second == resolved;
+  if (by_format && !depth_last && resolved && resolved->texture && !SameData(resolved->desc, desc) &&
+      !SameResolvedMemory(resolved->desc, desc)) {
+    auto own = g_textures.find(ResolveSlotKey(fetch.BasePage(), u32(fetch.Format())));
+    if (own != g_textures.end() && own->second && own->second.get() != resolved && own->second->texture &&
+        own->second->gpu_written &&
+        (SameData(own->second->desc, desc) || SameResolvedMemory(own->second->desc, desc))) {
+      static uint32_t logged = 0;
+      if (logged++ < 16)
+        RGPU_INFO("[renut] texture {:08X} (format {}) samples its own format's resolve at page {:05X}, not the "
+                  "page's last ({:08X})", texture_va, u32(fetch.Format()), fetch.BasePage(), resolved->guest_va);
+      return own->second.get();
+    }
+  }
   if (!resolved->texture)
     return nullptr;
   // The header's own slot answers for itself (the old one-slot-per-header destinations); a destination kept by base
@@ -824,7 +860,7 @@ HostTexture *ResolveTarget(u32 texture_va, plume::RenderFormat format, RenderSca
   // each new resolve (the hood scene's green and magenta tiles, the compound's blocks). A key no header VA uses
   // (0xF0000000 and up: base pages are 20 bits), so eviction, the memory report and Retire see these entries as before.
   const bool by_base = REXCVAR_GET(banjo_renut_resolve_any_size);
-  auto &slot = TextureSlot(by_base ? ResolveSlotKey(fetch.BasePage()) : texture_va);
+  auto &slot = TextureSlot(by_base ? ResolveSlotKey(fetch.BasePage(), u32(fetch.Format())) : texture_va);
   // banjo-nx (2026-10-28, night_gpu5, dynamic resolution steps): a destination of a settable code made at another
   // height of it (render/surfaces.cpp CodeForHeightLocked) is made again: its size is the old height's.
   if (slot && (!slot->render_target || std::memcmp(slot->desc, desc, sizeof(desc)) != 0 ||
@@ -855,7 +891,7 @@ HostTexture *ResolveTarget(u32 texture_va, plume::RenderFormat format, RenderSca
   slot->uploaded = true;
   slot->used_frame = g_frame;
   if (by_base) {
-    const u32 key = ResolveSlotKey(fetch.BasePage());
+    const u32 key = ResolveSlotKey(fetch.BasePage(), u32(fetch.Format()));
     g_page_slot_header[key] = texture_va;
     g_header_page_slot[texture_va] = key;
   }
@@ -864,6 +900,22 @@ HostTexture *ResolveTarget(u32 texture_va, plume::RenderFormat format, RenderSca
     entry = slot.get();
     ++g_texture_epoch;  // banjo-nx (2026-10-19, render-thread proposal 3): ResolvedAlias's answer changes
     BumpTexturePage(fetch.BasePage());  // banjo-nx (2026-10-27)
+  }
+  // fc4-nx (2026-11-11, the console's noise frames): a colour resolve into memory a depth resolve wrote before: the
+  // depth resolve's words are no longer what is there. Its g_depth_words entry stayed until its texture was retired,
+  // and an 8_8_8_8 texture over that memory that ResolvedAlias did not answer sampled the old depth words (depth and
+  // stencil bytes as colour: the purple / yellow banding). Far Cry 4 reuses its resolve memory frame to frame.
+  static const bool supersede = REXCVAR_GET(banjo_renut_depth_words_supersede);
+  if (supersede && !depth && !g_depth_words.empty()) {
+    if (auto w = g_depth_words.find(fetch.BasePage()); w != g_depth_words.end() && w->second != slot.get()) {
+      g_depth_words.erase(w);
+      ++g_texture_epoch;
+      BumpTexturePage(fetch.BasePage());
+      static uint32_t logged = 0;
+      if (logged++ < 16)
+        RGPU_INFO("[renut] colour resolve {:08X} into page {:05X}, where depth words were: those words dropped", texture_va,
+                  fetch.BasePage());
+    }
   }
   return slot.get();
 }

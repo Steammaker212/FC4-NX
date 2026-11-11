@@ -1845,6 +1845,9 @@ void ReportNvk() {
 }
 
 
+REXCVAR_DEFINE_INT32(banjo_renut_diag_resolve_trace_every_s, 30, "Banjo/Diagnostics",
+                     "fc4-nx (2026-11-11): banjo_renut_diag_resolve_trace traces one frame this often (seconds)")
+    .range(1, 3600);
 std::atomic<bool> g_trace_frame{false};  // banjo-nx (2026-10-19): read inline by ResolveTraceOn
 namespace {
 std::chrono::steady_clock::time_point g_trace_last{};
@@ -1860,7 +1863,7 @@ void ResolveTraceFrameStart() {
     g_trace_frame.store(false, std::memory_order_relaxed);
     REXLOG_INFO("[trace] frame end");
   } else if (g_trace_last == std::chrono::steady_clock::time_point{} ||
-             now - g_trace_last >= std::chrono::seconds(30)) {
+             now - g_trace_last >= std::chrono::seconds(REXCVAR_GET(banjo_renut_diag_resolve_trace_every_s))) {
     g_trace_last = now;
     g_trace_frame.store(true, std::memory_order_relaxed);
     REXLOG_INFO("[trace] frame start");

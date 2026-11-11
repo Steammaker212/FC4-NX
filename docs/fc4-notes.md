@@ -711,3 +711,49 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   PC picture unchanged (its near-objects-dark is the D3D12 reversed viewport depth range, above).
 - hw11 clips: outdoor cutscenes right at 30 fps; dinner lit on the console (unlike PC) but overexposed, with noise
   frames; the mansion gameplay ~50 % noise frames; fps 7-30 (median 17.5).
+
+## Console run hw12 (2026-11-11): no freeze; noise frames and overexposure in gameplay
+- The freeze is gone (region cap). The run's log is in fc4.1.log + fc4.log on the SD (spdlog rotates at 5 MB, up to
+  20 files: collect fc4*.log). Gameplay from the user's save: outdoor scenes blown out (white grass, blue-white rock),
+  ~half the frames noise (purple / yellow or cyan herringbone that follows the scene's edges; particles, HUD and
+  subtitles drawn right over it), a dark or red quarter-size image in the top-left of some frames; 11-21 fps.
+- **PC does not reproduce it:** the user's save (renut/B13EBABEBABEBABE/555308CA on the SD, copied to
+  out/pc_user/B13EBABEBABEBABE) loads on PC with the dinner input script (49:DOWN,52:A picks Continue (Offline) when a
+  save exists; B closes the tutorial cards). Run pcplay7: the same jungle renders right, normal exposure, no noise;
+  pcslow1 (banjo_renut_diag_frame_sleep_ms 70, 12.5 fps like the console): no noise either. So the cause is on the
+  deko3d path (or the console's timing), not FC4's renderer emulation as such.
+- Ruled out: Renut's dynamic resolution (off; x1 scale all run), target growth (the same one event as PC), the luminance
+  grid's layout (texels as the GPU writes them, then the 8in32 swap), the readback's caches (map invalidates; L2 flushed
+  after the copy), the ring cleaner (submits wait for its ticket), VS output pruning (masks, never renumbers).
+- Found and fixed (banjo_renut_depth_words_supersede): a depth resolve's words stayed registered for its page (g_depth_words) until its texture was retired,
+  so an 8_8_8_8 texture over memory FC4 had since reused for a colour resolve could sample old depth words (the noise
+  looks like D24S8 words as colour). A colour resolve into the page now drops them ("[renut] colour resolve ... depth
+  words dropped").
+- hw13 is a diagnostic build: banjo_renut_diag_resolve_trace on, every 8 s (banjo_renut_diag_resolve_trace_every_s),
+  with banjo_renut_diag_trace_probes: each traced frame's full-width colour resolves get a 96x64 centre patch read back
+  and logged with mean and jitter ("[trace] probe ..."), so noisy traced frames name themselves and the resolve where the
+  noise starts; banjo_renut_diag_readback_stats on (the luminance values behind the exposure; the traced lighting and
+  composite draws log c48 too, comparable with PC's).
+- Why the console and not PC: the console's GPU is slow enough that FC4's own dynamic resolution moves (960x608 and
+  480x304 resolves in hw12; PC stays at 1280x704), and its resolve buffers then share pages between formats. A
+  16_16_16_16 resolve (B3239834, the bright-pass mask) and an 8_8_8_8 one landed on one page; the page-keyed slot
+  kept one, and the other was made from guest memory (hw12's [flash] lines): garbage values, white-out.
+  banjo_renut_resolve_format_slots (on) keys page slots by format too, and a fetch whose page last took another
+  format's resolve samples its own format's there. Not when the page's last is a depth resolve with its words
+  registered: FC4 samples depth as 8_8_8_8, and PC run pcslot1 (the fallback without that guard) took an older colour
+  resolve for depth.
+- PC reproduces the white-out: from the user's save with sticks held, the player walks into the fire, burns, dies and
+  respawns; around the fire and after the respawn the sky and ground go white with black stair-step blocks (runs
+  pcslot1, pcab_noslot, pcab_none: with or without today's texture changes, so older). FC4's dynamic resolution moves
+  there on PC too (the fire's particles), and the luminance grid's readback was kept by size (80x44 / 80x42 / 80x40):
+  a new size had no readback, the CPU read what the memory held and the exposure ran away. The console changes size
+  all the time: its white outdoor scenes. banjo_renut_resolve_readback_any_size (on): a size with no readback yet gets
+  the newest one of the formats and width (80; FC4's 60-wide 16_16_FLOAT reads in the menus stay apart), resampled.
+  The values written back are real in gameplay now (luminance means ~0.02; 1.0 / 0 in the menus).
+- Not the white-out after all: PC run pcfinal2 (the readback fix) still has it. Its G-buffer probes say why: the
+  three 1280x704 G-buffer resolves read 0.96 / 1.0 in every channel at the centre (normal frames ~0.38 / 0.62 / 0.07),
+  which is FC4's G-buffer clear (colour 1 1 1 1): nothing drawn there, 75 draws into the G-buffer against ~124 in a
+  good frame. Geometry (the ground) missing, with black stair-step blocks: the height map (64x64 16_16 tiles into an
+  atlas) is the suspect. "Draw dropped" now logs its running count at powers of two past 16. (The red tint in those runs is the player burning: gameplay.)
+- PC bisect runs need the menu input that survives the Xbox Live popup: `44:DOWN,45:A,52:DOWN,54:A` (a popup
+  swallows DOWN; the menu's cursor starts on Continue (Online), one DOWN is Continue (Offline)).
