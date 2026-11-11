@@ -683,3 +683,12 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
     all scale with r15 = t5.rgb^2 x (1 - t7.z) (t5/t6/t7: the three 1280x704 G-buffer resolves, t0 the depth's float
     target, t2 the 2304x768 shadow atlas, t3 the 640x352 light buffer, t4 the height map). "Near objects unlit, far
     right" fits a zero surface term with only fog left.
+  - G-buffer layout (traced, pctrace5; the resolve trace now names each destination's page): material shaders
+    (ps_54aafaff197d9523, ps_86af00885343b934) write oC0 = sqrt(albedo), oC1 = normal x 0.5 + 0.5, oC2 = material
+    params, oC3.x (no fourth target bound). Resolves RT0 -> E-view page F3D07 (physical 13D08), RT1 -> F4077 (14078),
+    RT2 -> F43E7 (143E8); the lighting draw binds 13D08 / 14078 / 143E8 at slots 5 / 6 / 7, as its shader expects.
+    The "L" show_texture role is the last lighting-type draw of the frame, whose slot order can differ: its slot 5/6
+    views (normals-like / albedo-like) do not prove a swap. Near-objects-unlit is still open.
+  - GPU clock: sys-clk accepted fc4_clock_gpu_mhz 768 but the console ran at 614.4 MHz handheld (sys-clk's own cap).
+- Switch hw11 NRO (D:\switch\fc4-nx\fc4-nx.nro, hw10 kept as fc4-nx.hw10.nro.bak; ELF out/switch_runs/renut_hw11.elf):
+  the crash fixes and the hand-over change above. hw10's 21 clips are in out/switch_runs/hw10/album (deleted from SD).

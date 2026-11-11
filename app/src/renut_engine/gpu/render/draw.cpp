@@ -12743,14 +12743,14 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
     const ClearRect r = source_rect ? *source_rect : ClearRect{0, 0, -1, -1};
     RGPU_INFO("[trace] resolve {} {:08X} ({}x{} fmt {} samples {}) -> texture {:08X} at ({},{}) level {} slice {}, "
               "rect ({},{})-({},{}), flags {:X} ({}{}); view of {:08X} (info {:08X} format {:08X} size {:08X}), "
-              "{} writes; dest fetch format {} signs {:02X} exp adjust {} num format {}",
+              "{} writes; dest fetch format {} signs {:02X} exp adjust {} num format {} page {:05X}",
               surface->depth ? "depth" : "colour", source_va, surface->width, surface->height, u32(surface->format),
               u32(surface->samples), dest_texture_va, dest_x, dest_y, dest_level, dest_slice, r.x1, r.y1, r.x2, r.y2,
               flags, (flags & 0x100) ? "clear colour after " : "", (flags & 0x200) ? "clear depth after" : "",
               surface->guest_va, surface->info_word, surface->format_word, surface->size_word, surface->writes,
               dest_format ? u32(dest_format->dword[1]) & 0x3F : 0xFFu, dest_format ? (u32(dest_format->dword[0]) >> 2) & 0xFF : 0u,
               dest_format ? int32_t(u32(dest_format->dword[3]) << 13) >> 26 : 0,
-              dest_format ? u32(dest_format->dword[3]) & 1 : 0u);
+              dest_format ? u32(dest_format->dword[3]) & 1 : 0u, dest_format ? u32(dest_format->dword[1]) >> 12 : 0u);
   }
   plume::RenderCommandList *cmd = s.command_list;
   static uint32_t depth_logged = 0;
