@@ -652,3 +652,34 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
 - More diagnostics: banjo_renut_diag_snapshot ("<ps hash>:<slot>", shown by show_texture SNAP),
   banjo_renut_diag_skip_depth_only (width), banjo_renut_diag_tests_colors (target count for diag_gbuffer_tests).
 - Switch hw10 NRO (D:\switch\fc4-nx\fc4-nx.nro; ELF out/switch_runs/renut_hw10.elf) has everything above.
+
+## Console run hw10 (2026-11-10): the crash, and the dinner on the console
+- **Crash (both runs, ~11 and ~8 minutes in):** std::terminate from std::bad_alloc in the profiler thread
+  (sdk/src/ui/switch_perf.cpp, ProfilerMain -> Report's vectors), after `AllocFixed: could not commit 0x10000 bytes ...
+  Failure 0xFFFF0001` (memalign of guest backing failed; backing 654 MB). Cause: plume's GPU region. In the boot's
+  texture burst Renut made 1,422 MB of textures before the first cold check (every 32 frames; the loading frames are
+  slow) released 268 of them; deko3d's image heap took 19 chunks of 64 MB and the region grew to 1,642 MB at the heap's
+  top. It never gave any back (0 givebacks: live images pinned its bottom chunks, and release() needs 128 MB free at the
+  bottom), so newlib kept 1,386 MB of the 3,028 MB heap for everything else: 2 MB never handed out, 99 MB free in
+  81,745 pieces, and 807 MB free inside the region. hw8/hw9 had the same 1.6-1.7 GB region; hw10 ran out first.
+  The same figure made the texture budget's "room" ~2 MB all game, so the memory policy evicted in urgent mode.
+- Fixes: the image heap fills its highest chunks first (plume_deko3d.cpp chunkOrder; the bottom empties); with
+  newlib's room short (heapRoomShort, < 256 MB) a released block gives back all the free space at the region's bottom
+  (regionReleaseLocked), and the guest heap's pressure callback also trims it (Deko3DTrimGpuRegion); the cold texture
+  check also runs by time (500 ms, 250 ms under pressure; render/textures.cpp); the profiler skips a report it cannot
+  allocate (catch std::bad_alloc).
+- **Dinner / palace on the console (clips):** frames alternate between the PC's picture (near objects unlit, bright
+  windows), frames of full-screen noise in ~80 px vertical strips (EDRAM tile columns: scene edges visible, colours
+  wild, as with garbage depth), quarter-size buffers in the top-left, and one frame of the normals G-buffer with only
+  the forward-drawn chairs shaded (every lighting pass rejected). hw9 was mostly noise; gameplay outdoors (bus,
+  checkpoint, Pagan's intro) renders right at ~30 fps; the dinner runs at 10 fps (GPU 96 %).
+  - Found: BindTargets ran the colour-to-depth transfer before settling a depth hand-over (banjo_deko3d_depth_handover,
+    deko3d only), so a resolve still sampling the depth image read the transferred depth. The hand-over's resolve is
+    now drawn first whenever a transfer is due (edram_transfer.cpp ColorToDepthDueLocked), and the hand-over is off
+    in FC4's Switch defaults (one depth copy a frame).
+  - Ruled out on PC: the Switch's eviction pressure (run pcpress1: memory policy on, reserve over the budget: no noise
+    frames). PC Vulkan (`--renut_gpu_backend=vulkan`) loses its device 3 s in (vkdin1): no PC repro of the SPIR-V path.
+  - Lighting shader ps_731cb5fa99c50d91: oC0 = lerp(fog colour, surface, fog transmittance) x c48.z; the surface terms
+    all scale with r15 = t5.rgb^2 x (1 - t7.z) (t5/t6/t7: the three 1280x704 G-buffer resolves, t0 the depth's float
+    target, t2 the 2304x768 shadow atlas, t3 the 640x352 light buffer, t4 the height map). "Near objects unlit, far
+    right" fits a zero surface term with only fog left.

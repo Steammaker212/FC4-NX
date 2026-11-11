@@ -1118,11 +1118,14 @@ void AdvanceTextureFrameLocked() {
     EvictIdleTexturesLocked();
   // banjo-nx: banjo_renut_memory_policy. Every kColdCheckFrames frames, and under pressure every second.
   if (const uint64_t reserve = banjo::renut_gpu::TextureReserveBytes(); reserve) {
+    // fc4-nx (2026-11-10, hw10 crash): also by time, every 500 ms and under pressure every 250 ms. The boot's loading
+    // frames are slow, and hw10 made 1,422 MB of textures before the first check (32 frames in) released 268 of them;
+    // the GPU region grown for them stayed (see plume_deko3d.cpp, regionReleaseLocked).
     static std::chrono::steady_clock::time_point last;
     bool due = g_frame % kColdCheckFrames == 0;
-    if (!due && g_memory_pressure) {
+    if (!due) {
       const auto now = std::chrono::steady_clock::now();
-      due = now - last >= std::chrono::seconds(1);
+      due = now - last >= std::chrono::milliseconds(g_memory_pressure ? 250 : 500);
     }
     if (due) {
       last = std::chrono::steady_clock::now();

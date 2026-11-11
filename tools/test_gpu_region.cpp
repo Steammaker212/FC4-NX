@@ -122,13 +122,25 @@ void Run(uint64_t seed, int steps) {
                 CHECK(low_before - grow < heap.brk + kSlack, "refused %llu KB though the region could grow",
                       (unsigned long long)(size >> 10));
             }
-        } else {
-            auto it = blocks.begin();
-            std::advance(it, rng() % blocks.size());
-            r.release(it->first, it->second, kGiveBackAt, kKeep, kStep, [&](uintptr_t new_low) {
+        } else if (op < 60) {
+            // fc4-nx (2026-11-10): Deko3DTrimGpuRegion: the whole free bottom (in steps) back to newlib.
+            const uint64_t bottom = r.free.count(r.low) ? r.free.at(r.low) : 0;
+            const uint64_t given = r.trim(kStep, [&](uintptr_t new_low) {
                 heap.end = new_low;
                 return true;
             });
+            CHECK(given == bottom / kStep * kStep, "trim gave %llu of a %llu free bottom", (unsigned long long)given,
+                  (unsigned long long)bottom);
+        } else {
+            auto it = blocks.begin();
+            std::advance(it, rng() % blocks.size());
+            // fc4-nx (2026-11-10): newlib's room short: everything at the bottom (regionReleaseLocked).
+            const bool short_room = rng() % 4 == 0;
+            r.release(it->first, it->second, short_room ? kStep : kGiveBackAt, short_room ? 0 : kKeep, kStep,
+                      [&](uintptr_t new_low) {
+                          heap.end = new_low;
+                          return true;
+                      });
             blocks.erase(it);
         }
         Check(r, blocks, heap);

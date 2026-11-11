@@ -164,7 +164,9 @@ banjo_renut_resolve_skip = true
 banjo_renut_depth_words_lazy = true
 banjo_deko3d_barrier_merge = true
 banjo_deko3d_barrier_lean = true
-banjo_deko3d_depth_handover = true
+# fc4-nx (2026-11-10, hw10 dinner garbage): off. FC4 restores depth and stencil from colour words over the same EDRAM
+# (banjo_renut_color_to_depth), which rewrites the image a handed-over resolve samples; one depth copy a frame more.
+banjo_deko3d_depth_handover = false
 banjo_deko3d_depth24 = true
 banjo_deko3d_push_constants = true
 banjo_deko3d_ring_cleaner = true

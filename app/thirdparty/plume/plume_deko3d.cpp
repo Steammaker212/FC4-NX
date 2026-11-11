@@ -93,6 +93,30 @@ namespace plume {
         return ok;
     }
 
+    // fc4-nx (2026-11-10, hw10 crash): a block's range back to the region. While newlib's room is short
+    // (heapRoomShort), all of the free space at the region's bottom goes back, not only past kRegionGiveBackAt and
+    // kRegionKeep: hw10's region grew to 1,642 MB in the boot's texture burst (1,422 MB of textures before the first
+    // eviction) and then held 807 MB free for good, while the guest heap's commits failed 11 minutes in. Under
+    // g_regionMutex; 'roomShort' is taken before it.
+    static bool heapRoomShort();
+    static void regionReleaseLocked(uintptr_t at, uint64_t span, bool roomShort) {
+        g_region.release(at, span, roomShort ? kRegionStep : kRegionGiveBackAt, roomShort ? 0 : kRegionKeep,
+                         kRegionStep, [](uintptr_t low) { return regionMoveHeapEnd(low, false); });
+    }
+
+    // fc4-nx (2026-11-10): where a region block's storage starts (0: not in the region). The image heap fills its
+    // highest chunks first, so the region's bottom empties and can go back.
+    static uintptr_t regionBlockAddress(DkMemBlock block) {
+        std::lock_guard<std::mutex> lock(g_regionMutex);
+        const auto it = g_regionBlocks.find(block);
+        return it != g_regionBlocks.end() ? it->second.first : 0;
+    }
+
+    uint64_t Deko3DTrimGpuRegion() {
+        std::lock_guard<std::mutex> lock(g_regionMutex);
+        return g_region.trim(kRegionStep, [](uintptr_t low) { return regionMoveHeapEnd(low, false); });
+    }
+
     void Deko3DGpuRegionFigures(Deko3DGpuRegionInfo &out) {
         std::lock_guard<std::mutex> lock(g_regionMutex);
         out.on = g_regionOn;
@@ -1101,12 +1125,12 @@ namespace plume {
                 armDCacheFlush(storage, m.size);
                 m.storage = storage;
                 DkMemBlock block = dkMemBlockCreate(&m);
+                const bool roomShort = !block && heapRoomShort();
                 std::lock_guard<std::mutex> lock(g_regionMutex);
                 if (block)
                     g_regionBlocks.emplace(block, std::make_pair(at, span));
                 else
-                    g_region.release(at, span, kRegionGiveBackAt, kRegionKeep, kRegionStep,
-                                     [](uintptr_t low) { return regionMoveHeapEnd(low, false); });
+                    regionReleaseLocked(at, span, roomShort);
                 return block;
             }
             // No room above newlib's break: newlib's heap, as before.
@@ -1175,9 +1199,9 @@ namespace plume {
         }
         dkMemBlockDestroy(block);
         if (range.second) {
+            const bool roomShort = heapRoomShort();
             std::lock_guard<std::mutex> lock(g_regionMutex);
-            g_region.release(range.first, range.second, kRegionGiveBackAt, kRegionKeep, kRegionStep,
-                             [](uintptr_t low) { return regionMoveHeapEnd(low, false); });
+            regionReleaseLocked(range.first, range.second, roomShort);
         }
 #if defined(PLUME_DEKO3D_GUARDS)
         std::lock_guard<std::mutex> lock(guardMutex);
@@ -1276,7 +1300,8 @@ namespace plume {
         collectRetired();
         std::lock_guard<std::mutex> lock(heapMutex);
         for (int pass = 0; pass < 2; pass++) {
-            for (size_t ci = 0; ci < chunks.size(); ci++) {
+            // fc4-nx (2026-11-10): highest chunk first (chunkOrder, see regionBlockAddress).
+            for (const uint32_t ci : chunkOrder) {
                 Chunk &c = chunks[ci];
                 for (size_t i = 0; i < c.freeList.size(); i++) {
                     const auto [off, len] = c.freeList[i];
@@ -1314,7 +1339,11 @@ namespace plume {
                     return false;
                 c.size = chunkSize;
                 c.freeList.push_back({0, chunkSize});
+                c.address = regionBlockAddress(c.block);
                 chunks.push_back(std::move(c));
+                chunkOrder.push_back(uint32_t(chunks.size() - 1));
+                std::stable_sort(chunkOrder.begin(), chunkOrder.end(),
+                                 [this](uint32_t a, uint32_t b) { return chunks[a].address > chunks[b].address; });
                 logf("image heap: chunk %zu of %u MiB", chunks.size(), chunkSize >> 20);
             }
         }

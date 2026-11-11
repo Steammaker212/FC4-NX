@@ -1792,23 +1792,27 @@ uint32_t ShaderProfileLabel(const Targets &t, const ShaderRecord *ps, const Pipe
 
 // banjo-nx (2026-10-28, GPU block): 'depth_writes': the draw it binds for writes depth or stencil (a clear's binds do).
 bool BindTargets(const Targets &t, bool depth_writes = true) {
-  // fc4-nx (2026-11-10, banjo_renut_color_to_depth): the colour words over its EDRAM first, if they are newer.
-  if (t.depth && ColorToDepthBeforeBindLocked(t.depth)) {
-    g_bound.framebuffer = nullptr;
-    g_bound.pipeline = nullptr;
-    g_bound.layout = false;
-    g_bound.viewport_set = false;
-  }
+  // fc4-nx (2026-11-10, hw10's dinner on the console): a colour-to-depth transfer rewrites the image a handed-over
+  // depth resolve still samples (banjo_deko3d_depth_handover), so that resolve is drawn first, from the image as it was
+  // resolved; the transfer used to run before it and the resolve read the new depth.
+  const bool transfer = t.depth && ColorToDepthDueLocked(t.depth);
   if (t.depth && t.depth->handed) {
     // banjo-nx (2026-10-28, banjo_deko3d_depth_handover_readonly): a draw that writes neither leaves the image as the
     // resolve read it ('writes', which the hand-over checks, moves only for those): the resolve stays left out.
-    if (!depth_writes && banjo::renut_gpu::DepthHandOverReadOnlyOn()) {
+    if (!depth_writes && !transfer && banjo::renut_gpu::DepthHandOverReadOnlyOn()) {
       banjo::renut_gpu::CountHandOver(6);
     } else {
       g_materialise_cause = depth_writes ? 7 : 9;  // banjo-nx (2026-10-28, diagnostic)
       DepthHandOverBeforeBindLocked(t.depth, nullptr, 0);  // banjo-nx (2026-10-19, banjo_deko3d_depth_handover)
       g_materialise_cause = 9;
     }
+  }
+  // fc4-nx (2026-11-10, banjo_renut_color_to_depth): the colour words over its EDRAM, if they are newer.
+  if (transfer && ColorToDepthBeforeBindLocked(t.depth)) {
+    g_bound.framebuffer = nullptr;
+    g_bound.pipeline = nullptr;
+    g_bound.layout = false;
+    g_bound.viewport_set = false;
   }
   // banjo-nx: with banjo_renut_diag_gpu_shaders the draw marks its own label (ShaderProfileLabel), the pass's name
   // in it, which saves a timestamp a draw.

@@ -44,6 +44,7 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
+#include <new>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -412,8 +413,22 @@ void ApplyExclusiveCore(FILE* f, const std::vector<size_t>& order) {
   }
 }
 
-void Report(u64 elapsed_ticks, u64 tick_freq, u64 counters_last[kCounterCount],
-            const char* mode) {
+void ReportUnguarded(u64 elapsed_ticks, u64 tick_freq, u64 counters_last[kCounterCount],
+                     const char* mode);
+
+// fc4-nx (2026-11-10, hw10 crash): a report the heap cannot allocate for is skipped. Both hw10 runs ended in
+// std::terminate from this thread (std::bad_alloc in Report's vectors) once the guest heap had run out of room.
+void Report(u64 elapsed_ticks, u64 tick_freq, u64 counters_last[kCounterCount], const char* mode) {
+  try {
+    ReportUnguarded(elapsed_ticks, tick_freq, counters_last, mode);
+  } catch (const std::bad_alloc&) {
+    static int logged = 0;
+    if (logged++ < 4) fprintf(stderr, "[profile] report skipped: no memory for it\n");
+  }
+}
+
+void ReportUnguarded(u64 elapsed_ticks, u64 tick_freq, u64 counters_last[kCounterCount],
+                     const char* mode) {
   const double seconds = double(elapsed_ticks) / double(tick_freq);
 
   u64 counters_now[kCounterCount];

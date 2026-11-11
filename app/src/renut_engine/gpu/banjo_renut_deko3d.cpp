@@ -479,6 +479,7 @@ void InstallShaderCache() {
     ::renut::gpu::ReleaseSpareBuffersNow();
     ::renut::gpu::RequestTextureRelief();
     (void)plume::Deko3DReleaseEmptyChunks();
+    (void)plume::Deko3DTrimGpuRegion();  // fc4-nx (2026-11-10, hw10 crash): the region's free bottom to newlib
   });
 #endif
   plume::Deko3DSetBindTrace(REXCVAR_GET(banjo_deko3d_bind_trace));  // fc4-nx (2026-11-10)

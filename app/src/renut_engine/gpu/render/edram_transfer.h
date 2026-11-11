@@ -7,4 +7,6 @@ struct HostSurface;
 // stencil become that colour target's words (as on the console, where both are the same memory). Caller holds the
 // render lock; the framebuffer bound before is unbound.
 bool ColorToDepthBeforeBindLocked(HostSurface *depth);  // true: it drew (the bound state is gone)
+// Whether ColorToDepthBeforeBindLocked would draw now (fc4-nx 2026-11-10: a depth hand-over is settled before it).
+bool ColorToDepthDueLocked(HostSurface *depth);
 } // namespace renut::gpu

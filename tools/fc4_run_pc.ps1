@@ -2,7 +2,7 @@
 # (out/pc_runs/<Name>), muted, PNG captures every -Every seconds, stopped after -Seconds. Stops only the process it
 # started.
 #   powershell -File tools/fc4_run_pc.ps1 -Seconds 90 -Name boot1 [-Every 15] [-Extra "--gpu_plugin=xenos"] [-Visible]
-param([int]$Seconds = 90, [string]$Name = "run", [int]$Every = 15, [string]$Extra = "", [switch]$Visible, [string]$Build = "pc")
+param([int]$Seconds = 90, [string]$Name = "run", [int]$Every = 15, [string]$Extra = "", [switch]$Visible, [string]$Build = "pc", [int]$Max = 60)
 $root = Split-Path -Parent $PSScriptRoot
 $dir = Join-Path $root ("app\out\" + $Build)  # -Build pc_renut: the Renut renderer build
 $exe = Join-Path $dir "renut.exe"
@@ -15,7 +15,7 @@ $min = if ($Visible) { "false" } else { "true" }
 $userRoot = (Join-Path $root "out\pc_user") -replace '\\', '/'
 $argv = @("--log_file=`"$log`"", "--audio_mute=true", "--window_start_minimized=$min", "--fullscreen=false",
           "--game_data_root=`"$game`"", "--user_data_root=`"$userRoot`"",
-          "--nfsmw_captura_cada_s=$Every", "--nfsmw_captura_max=60", "--log_file_writer=false") +
+          "--nfsmw_captura_cada_s=$Every", "--nfsmw_captura_max=$Max", "--log_file_writer=false") +
         @($Extra -split ' ' | Where-Object { $_ })
 $style = if ($Visible) { "Normal" } else { "Minimized" }
 $p = Start-Process -FilePath $exe -ArgumentList $argv -WorkingDirectory $dir -PassThru -WindowStyle $style `

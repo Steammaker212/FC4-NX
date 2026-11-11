@@ -168,14 +168,27 @@ plume::RenderPipeline *Pipeline(VideoState &s, plume::RenderFormat format, uint3
 
 } // namespace
 
-bool ColorToDepthBeforeBindLocked(HostSurface *depth) {
+namespace {
+HostSurface *TransferSourceLocked(HostSurface *depth) {
   static const bool on = REXCVAR_GET(banjo_renut_color_to_depth);
   if (!on || g_pass.failed || !depth || !depth->depth || !depth->texture ||
       depth->samples != plume::RenderSampleCount::COUNT_1)
-    return false;
+    return nullptr;
   HostSurface *color = ColorOverDepthLocked(depth);
   if (!color || !color->texture || color->write_seq <= depth->write_seq || color->write_seq == depth->transfer_seq ||
       color->samples != plume::RenderSampleCount::COUNT_1 || color->scale != depth->scale)
+    return nullptr;
+  return color;
+}
+}  // namespace
+
+bool ColorToDepthDueLocked(HostSurface *depth) {
+  return TransferSourceLocked(depth) != nullptr;
+}
+
+bool ColorToDepthBeforeBindLocked(HostSurface *depth) {
+  HostSurface *color = TransferSourceLocked(depth);
+  if (!color)
     return false;
   VideoState &s = State();
   if (!s.command_list)

@@ -98,6 +98,29 @@ struct GpuRegionRanges {
         ++givebacks;
     }
 
+    // fc4-nx (2026-11-10, hw10 crash): all of the free range at the bottom (in whole 'step's) back to newlib, if
+    // raise(new low) allows it, whatever release's thresholds. The bytes given back.
+    template <typename Raise>
+    uint64_t trim(uint64_t step, Raise &&raise) {
+        auto it = free.find(low);
+        if (it == free.end())
+            return 0;
+        const uint64_t give = it->second / step * step;
+        if (!give)
+            return 0;
+        const uintptr_t newLow = low + give;
+        if (!raise(newLow))
+            return 0;
+        const uint64_t rest = it->second - give;
+        free.erase(it);
+        if (rest)
+            free.emplace(newLow, rest);
+        low = newLow;
+        givenBack += give;
+        ++givebacks;
+        return give;
+    }
+
     uint64_t freeBytes() const {
         uint64_t bytes = 0;
         for (const auto &r : free)

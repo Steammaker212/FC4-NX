@@ -572,9 +572,11 @@ namespace plume {
             DkMemBlock block = nullptr;
             uint32_t size = 0;
             std::vector<std::pair<uint32_t, uint32_t>> freeList; // offset, size, sorted by offset
+            uintptr_t address = 0;  // fc4-nx (2026-11-10): its storage in the GPU region (0: not in it)
         };
         std::mutex heapMutex;
         std::vector<Chunk> chunks;
+        std::vector<uint32_t> chunkOrder;  // fc4-nx (2026-11-10): chunk indices, highest address first
 
         // Shader code: blocks, bump allocated.
         std::mutex codeMutex;
@@ -795,6 +797,9 @@ namespace plume {
     // fc4-nx (2026-11-10): the image heap's empty chunks back to the heap now (any thread; takes the heap lock). The
     // bytes given back. For the guest heap's commits (RexGmSetMemoryPressureCallback).
     uint64_t Deko3DReleaseEmptyChunks();
+    // fc4-nx (2026-11-10, hw10 crash): all the free space at the GPU region's bottom back to newlib now (any thread).
+    // The bytes given back.
+    uint64_t Deko3DTrimGpuRegion();
     // fc4-nx (2026-11-10): the last pipeline binds' shader names in a ring, logged when a fence does not signal in 2 s
     // (which draw a GPU hang is in). Off by default: a copy of 48 bytes a bind.
     void Deko3DSetBindTrace(bool on);
