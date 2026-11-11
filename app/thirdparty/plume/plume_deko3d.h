@@ -878,6 +878,11 @@ namespace plume {
     // 4x8 tiles with it).
     struct Deko3DOptions {
         bool depthCompression = false;
+        // fc4-nx (2026-11-11): discardTexture clears a new render or depth target (bound alone, then the command
+        // list's framebuffer again). Images are sub-allocated from reused memory with hardware compression: a target
+        // held the bytes and compression state of whatever was there before, and a blend into it, or a read of a part
+        // not yet drawn, gave that back (D3D12 discards; plume's deko3d discard did nothing).
+        bool discardClears = true;
         bool zcull = false;
         // A pipeline's vertex shader gets specialization constant 905 (when it declares it), the locations its pixel
         // shader reads of the ones it writes (none without a pixel shader; not with a geometry shader): banjo-nx's

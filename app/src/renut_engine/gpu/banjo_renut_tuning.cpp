@@ -479,6 +479,11 @@ REXCVAR_DEFINE_BOOL(banjo_deko3d_barrier_lean, true, "Banjo/Enhancements",
                     "the texture cache (only a read after a write needs it invalidated, and that read's transition "
                     "does it), and a texture going from one read layout to another needs no barrier at all. Same "
                     "pixels");
+REXCVAR_DEFINE_BOOL(banjo_deko3d_discard_clears, true, "Banjo/Enhancements",
+                    "fc4-nx (2026-11-11, the console's noise frames): a new render or depth target is cleared when "
+                    "Renut discards it (plume's deko3d discard did nothing). Images come from reused memory with "
+                    "hardware compression, so a new target started with the old image's bytes and compression state, "
+                    "and blends into it or reads of parts not yet drawn returned them. Read at start");
 REXCVAR_DEFINE_BOOL(banjo_deko3d_zcull, true, "Banjo/Enhancements",
                     "deko3d renderer (2026-10-18): hierarchical depth culling (Zcull) on the queue: tiles a draw cannot "
                     "pass the depth test in are skipped before shading. Same pixels");
@@ -1383,6 +1388,7 @@ bool RecordWorkerAbOn() {
 
 bool Deko3DDepthCompressionOn() { return REXCVAR_GET(banjo_deko3d_depth_compression); }
 bool Deko3DZcullOn() { return REXCVAR_GET(banjo_deko3d_zcull); }
+bool Deko3DDiscardClearsOn() { return REXCVAR_GET(banjo_deko3d_discard_clears); }
 bool Deko3DMsaaPositionsOn() { return REXCVAR_GET(banjo_deko3d_msaa_positions); }  // 2026-10-30, from sasrt-nx
 bool Deko3DA2cDitherOn() { return REXCVAR_GET(banjo_deko3d_a2c_dither); }
 bool Deko3DStripRestartOn() { return REXCVAR_GET(banjo_deko3d_strip_restart); }

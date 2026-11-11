@@ -1754,6 +1754,9 @@ void DropSmallerDepth(const GuestDevice &device, Targets &t, uint64_t vs_hash, u
       }
     }
     banjo::renut_gpu::CountUiDepth(false);
+    // fc4-nx (2026-11-11): at one scale it grows to the colour's size, from its next bind (this draw is still cut).
+    if (d->scale == c->scale)
+      GrowDepthForColorLocked(d, std::max(c->width, d->width), std::max(c->height, d->height));
     static uint32_t logged = 0;
     if (LogLimited(logged, 16))
       RGPU_WARN("A draw tests depth or stencil against a depth target smaller than its colour target ({}x{} at "

@@ -1237,7 +1237,33 @@ namespace plume {
 
     void Deko3DCommandList::buildBottomLevelAS(const RenderAccelerationStructure *, RenderBufferReference, const RenderBottomLevelASBuildInfo &) {}
     void Deko3DCommandList::buildTopLevelAS(const RenderAccelerationStructure *, RenderBufferReference, RenderBufferReference, const RenderTopLevelASBuildInfo &) {}
-    void Deko3DCommandList::discardTexture(const RenderTexture *) {}
+    void Deko3DCommandList::discardTexture(const RenderTexture *texture) {
+        // fc4-nx (2026-11-11, Deko3DOptions::discardClears): a defined start for a new target.
+        const Deko3DTexture *t = static_cast<const Deko3DTexture *>(texture);
+        if (!Deko3DGetOptions().discardClears || !t || !t->valid ||
+            (t->type != DkImageType_2D && t->type != DkImageType_2DMS))
+            return;
+        const bool depth = (t->desc.flags & RenderTextureFlag::DEPTH_TARGET) != 0;
+        if (!depth && !(t->desc.flags & RenderTextureFlag::RENDER_TARGET))
+            return;
+        DkImageView view = t->defaultView();
+        flushBarriers();
+        if (depth)
+            dkCmdBufBindRenderTargets(cmd, nullptr, 0, &view);
+        else {
+            const DkImageView *colors[1] = {&view};
+            dkCmdBufBindRenderTargets(cmd, colors, 1, nullptr);
+        }
+        const DkScissor all = {0, 0, 16384, 16384};
+        dkCmdBufSetScissors(cmd, 0, &all, 1);
+        if (depth)
+            dkCmdBufClearDepthStencil(cmd, true, 1.0f, 0xFF, 0);
+        else
+            dkCmdBufClearColorFloat(cmd, 0, DkColorMask_RGBA, 0.0f, 0.0f, 0.0f, 0.0f);
+        restoreScissors();
+        if (framebuffer)
+            setFramebuffer(framebuffer);
+    }
     void Deko3DCommandList::resetQueryPool(const RenderQueryPool *, uint32_t, uint32_t) {}
 
     void Deko3DCommandList::writeTimestamp(const RenderQueryPool *queryPool, uint32_t queryIndex) {

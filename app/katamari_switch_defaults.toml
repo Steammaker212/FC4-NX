@@ -209,7 +209,7 @@ banjo_renut_pipeline_memo = true
 renut_gpu_profile = 0.0
 # fc4-nx (2026-11-11, hw13/hw14 diagnostic runs): one traced frame every 20 s (8 in hw13) with resolve probes (noise frames), and the
 # luminance readback values (exposure). A short hitch at each traced frame.
-banjo_renut_diag_resolve_trace = true
+banjo_renut_diag_resolve_trace = false  # hw15: off (its traced frames hitched)
 banjo_renut_diag_resolve_trace_every_s = 20
 banjo_renut_diag_readback_stats = true
 banjo_renut_diag_gpu_shaders = false

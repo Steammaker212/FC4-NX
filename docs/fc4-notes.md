@@ -780,3 +780,21 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   "[renut] depth target ... left out" logs the case, and colour targets of unequal sizes in one draw are logged.
 - Generic shader variants: 1777 stages drew with their generic variant, 258 swapped in their own by the end of the
   run (the uam thread rests between background compiles). "Same pixels" by design; not shown wrong yet.
+
+## Console run hw14 (2026-11-11): exposure right, noise frames remain
+- The user's run (fc4.1.log + fc4.log from 08:11, 9 clips and 4 screenshots in out/switch_runs/hw14/album): the good
+  frames now have the PC's exposure (post-process precision High). The purple / yellow herringbone frames remain:
+  out/switch_runs measured with a colour-step metric (scratch tool), hw12 18 % of clip frames noisy, hw14 10 %.
+  The user felt hw11 / hw12 played better (the phone scene, the tutorial cards loading); the trace's frames hitched
+  every 8 / 20 s in hw13 / hw14.
+- "[flash] ... made from guest memory": hw12 12, hw14 2 (banjo_renut_resolve_format_slots took B3239834's).
+- Draws that test a smaller depth target (dynamic resolution: 1280x704 colour with a 640x336 or 1280x672 depth,
+  640x352 with 640x336; VS 793395BDBC0250CA without a pixel shader, RB_DEPTHCONTROL 00700203 / 00704573): kept and
+  cut on Maxwell. hw15: banjo_renut_grow_tested_depth grows such a depth target's view to the colour's size (once,
+  from its next bind).
+- **plume's deko3d discardTexture did nothing.** Images are sub-allocated from reused memory and render targets have
+  hardware compression (colour always, depth with banjo_deko3d_depth_compression): a new target started with the
+  previous image's bytes and compression state, which blends into it and reads of parts not yet drawn return.
+  hw15: banjo_deko3d_discard_clears (Deko3DOptions::discardClears) clears a new render / depth target (bound alone,
+  then the list's framebuffer again) wherever Renut discards one (new surfaces, resolve destinations, depth words).
+- hw15 has the trace off (banjo_renut_diag_resolve_trace false).

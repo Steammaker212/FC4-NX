@@ -454,6 +454,7 @@ void InstallShaderCache() {
   // banjo-nx (2026-10-18, GPU bandwidth): depth compression and Zcull, which the device and its textures take.
   plume::Deko3DOptions options;
   options.depthCompression = Deko3DDepthCompressionOn();
+  options.discardClears = Deko3DDiscardClearsOn();  // fc4-nx (2026-11-11)
   options.zcull = Deko3DZcullOn();
   options.msaaPositions = Deko3DMsaaPositionsOn();  // 2026-10-30, from sasrt-nx
   options.alphaToCoverageDither = Deko3DA2cDitherOn();

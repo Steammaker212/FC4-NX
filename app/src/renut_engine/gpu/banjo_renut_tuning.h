@@ -232,6 +232,7 @@ void CountDepthFloatSampled();
 // banjo_deko3d_depth_compression / banjo_deko3d_zcull (2026-10-18): read before the deko3d device is made.
 bool Deko3DDepthCompressionOn();
 bool Deko3DZcullOn();
+bool Deko3DDiscardClearsOn();  // banjo_deko3d_discard_clears (fc4-nx, 2026-11-11)
 // 2026-10-30, from sasrt-nx: banjo_deko3d_msaa_positions, _a2c_dither, _strip_restart (plume Deko3DOptions).
 bool Deko3DMsaaPositionsOn();
 bool Deko3DA2cDitherOn();

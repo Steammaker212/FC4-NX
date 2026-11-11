@@ -41,6 +41,9 @@ REXCVAR_DEFINE_BOOL(banjo_renut_resolve_extents, true, "Banjo/Renut",
                     "makes every target of that view's shape that large from its next use. Far Cry 4 tiles its "
                     "G-buffer (two tiles in 880-wide surfaces) and resolves the second tile at 864-1280, which an "
                     "880-wide target never drew: a third of the picture garbage. false: targets keep the surface size");
+REXCVAR_DEFINE_BOOL(banjo_renut_grow_tested_depth, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-11): a depth target that a draw tests, bound with larger colour targets, grows to "
+                    "their size (Maxwell renders no further than the smallest attachment)");
 REXCVAR_DEFINE_BOOL(banjo_renut_view_float16, true, "Banjo/Renut",
                     "fc4-nx (2026-11-10): once an EDRAM colour view has been bound as 16_16_16_16_FLOAT, every surface "
                     "over it in a 16_16_16_16 format takes the float target (the console's EDRAM is one memory; Far "
@@ -668,6 +671,38 @@ void NoteResolveExtentLocked(const HostSurface *surface, int32_t x1, int32_t y1,
     RGPU_INFO("[renut] a resolve reached {}x{} past target {:08X} ({}x{}, view {:X}): its view's targets grow to it "
               "(banjo_renut_resolve_extents)", x2, y2, surface->guest_va, surface->width, surface->height,
               own & kViewShapeMask);
+}
+
+// fc4-nx (2026-11-11, the console's top-left quarter): a depth target a draw tests while bound with larger colour
+// targets grows to their size (its view's targets, as banjo_renut_resolve_extents grows them). FC4's dynamic resolution
+// binds a 640x336 or 1280x672 depth target with 1280x704 colour; on the Xbox both are EDRAM and the test covers the
+// whole draw, on Maxwell the draw stops at the depth target's edge. What the target held is lost once, at the growth.
+bool GrowDepthForColorLocked(const HostSurface *depth, uint32_t width, uint32_t height) {
+  static const bool on = REXCVAR_GET(banjo_renut_grow_tested_depth);
+  if (!on || !depth || !depth->depth || width > 2048 || height > 2048 ||
+      (width <= depth->width && height <= depth->height))
+    return false;
+  uint64_t own = 0;
+  for (const auto &[key, target] : g_targets) {
+    if (target.get() == depth) {
+      own = key;
+      break;
+    }
+  }
+  if (!own)
+    return false;
+  auto &e = g_resolve_extents[own & kViewShapeMask];
+  const uint32_t w = std::max({e.first, width, depth->width});
+  const uint32_t h = std::max({e.second, height, depth->height});
+  if (w == e.first && h == e.second)
+    return false;
+  e = {w, h};
+  ++g_surface_epoch;
+  static uint32_t logged = 0;
+  if (logged++ < 16)
+    RGPU_INFO("[renut] depth target {:08X} ({}x{}) tested by a draw into {}x{} colour: its view's targets grow to {}x{} "
+              "(banjo_renut_grow_tested_depth)", depth->guest_va, depth->width, depth->height, width, height, w, h);
+  return true;
 }
 
 void SetTilingExtentLocked(uint32_t width, uint32_t height) {

@@ -196,6 +196,8 @@ void SetTilingExtentLocked(uint32_t width, uint32_t height);
 // fc4-nx (2026-11-10, banjo_renut_resolve_extents): a resolve of 'surface' reaching guest x2/y2 past its edge: every
 // target of its view's shape is made that large from its next use (a tiled pass drawn once at screen coordinates).
 void NoteResolveExtentLocked(const HostSurface *surface, int32_t x1, int32_t y1, uint32_t x2, uint32_t y2);
+// fc4-nx (2026-11-11): banjo_renut_grow_tested_depth; true if the depth target's view grows (from its next bind).
+bool GrowDepthForColorLocked(const HostSurface *depth, uint32_t width, uint32_t height);
 
 // The surface no longer uses its target (guest D3DResource_Destroy); the
 // target is retired when no surface over its view remains.
