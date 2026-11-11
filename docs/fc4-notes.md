@@ -762,3 +762,21 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   (nothing drawn) or at normal values with a high c48.z (exposure). (The red tint in those runs is the player burning: gameplay.)
 - PC bisect runs need the menu input that survives the Xbox Live popup: `44:DOWN,45:A,52:DOWN,54:A` (a popup
   swallows DOWN; the menu's cursor starts on Continue (Online), one DOWN is Continue (Offline)).
+
+## Console run hw13 (2026-11-11): two Switch-only causes found
+- The user's run (log in fc4.log from 07:35, 7 clips in out/switch_runs/hw13/album; frames pulled with a small WinRT
+  MediaComposition grabber, no ffmpeg): most gameplay frames corrupt. The G-buffer probes were normal (albedo ~0.3-0.5,
+  normals ~0.5-0.78, as on PC), so the geometry pass is right; the damage is after it.
+- **Cause 1, the white grass / cyan rock: renut_post_process_precision = "Game" in the Switch defaults** (PC: High).
+  The trace's resolves differ from PC's in their host formats only: PC's 640x352 and 160x88 / 80x44 passes are
+  R16G16B16A16 (FLOAT 10 / UNORM 11), the console's RGBA8 (20). FC4 binds the same 640x352 EDRAM as 2_10_10_10_FLOAT and
+  as 8_8_8_8; with High the 8_8_8_8 view is 64-bit and banjo_renut_view_float16 joins it to the float target, with Game
+  it is a separate RGBA8 host target holding other content. PC with --renut_post_process_precision=Game (run pcgame1)
+  shows the console's picture: white grass, cyan-white rock, washed-out scenes. hw14: High on the Switch too.
+- **Cause 2, the top-left quarter (and old content around it): Maxwell clips a draw to its smallest attachment**
+  (usf4-nx's docs/deko3d-renderer-usf4.md, section 5). DropSmallerDepth left a smaller depth target out only when its
+  render scale differed; at 1x (always, on the Switch) a quarter-size pass's depth target stayed bound for the
+  full-screen passes and only their top-left 640x352 was drawn. Now by host size (draws, the fast path and clears);
+  "[renut] depth target ... left out" logs the case, and colour targets of unequal sizes in one draw are logged.
+- Generic shader variants: 1777 stages drew with their generic variant, 258 swapped in their own by the end of the
+  run (the uam thread rests between background compiles). "Same pixels" by design; not shown wrong yet.

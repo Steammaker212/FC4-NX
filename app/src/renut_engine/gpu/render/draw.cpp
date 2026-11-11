@@ -1705,8 +1705,18 @@ bool GatherTargets(const GuestDevice &device, Targets &t) {
   // post-processing buffers render at 1x with the scene's depth still bound,
   // untested (on the console too its pitch is not theirs), so only colors count.
   bool mixed = false;
-  for (uint32_t i = 1; i < t.color_count; ++i)
+  for (uint32_t i = 1; i < t.color_count; ++i) {
     mixed = mixed || t.colors[i]->scale != t.scale;
+    // fc4-nx (2026-11-11): Maxwell renders no further than the smallest attachment (see DropSmallerDepth).
+    const HostSurface *ci = t.colors[i];
+    if (ci->scale.Size(ci->width) < first->scale.Size(first->width) ||
+        ci->scale.Size(ci->height) < first->scale.Size(first->height)) {
+      static uint32_t logged = 0;
+      if (LogLimited(logged, 16))
+        RGPU_WARN("Draw binds colour target {} ({}x{}) smaller than colour target 0 ({}x{}): cut to the smaller "
+                  "on Maxwell", i, ci->width, ci->height, first->width, first->height);
+    }
+  }
   if (mixed) {
     static uint32_t logged = 0;
     if (LogLimited(logged, 8)) {
@@ -1751,6 +1761,13 @@ void DropSmallerDepth(const GuestDevice &device, Targets &t, uint64_t vs_hash, u
                 "cut to the depth's size", c->width, c->height, c->scale.Factor(), d->width, d->height,
                 d->scale.Factor(), vs_hash, ps_hash, dc);
     return;
+  }
+  if (d->scale == c->scale) {  // fc4-nx (2026-11-11): the case Maxwell clipped
+    static uint32_t logged = 0;
+    if (LogLimited(logged, 8))
+      RGPU_INFO("[renut] depth target {:08X} ({}x{}) left out of a draw into {}x{} colour that does not test it "
+                "(Maxwell would cut the draw to the depth's size)", d->guest_va, d->width, d->height, c->width,
+                c->height);
   }
   t.depth = nullptr;
   t.depth_dropped = true;
@@ -8559,7 +8576,7 @@ int FastDrawLocked(const u8 *device_state, const DrawCall &call, const ReplayCon
   } else if (targets_changed) {
     if (!GatherTargets(device, gathered))
       return FastMiss(kFastFields);
-    if (gathered.depth && gathered.color_count && gathered.depth->scale != gathered.scale)
+    if (gathered.depth && gathered.color_count)  // fc4-nx (2026-11-11): by size (see DrawStateLocked)
       DropSmallerDepth(device, gathered, vs->hash, device_ps ? device_ps->hash : 0);
   }
   const Targets &targets = targets_changed ? gathered : f.targets;
@@ -10262,7 +10279,11 @@ bool DrawStateLocked(const u8 *device_state, const DrawCall &call, const ReplayC
   // as large as its smallest attachment, so it is left out when the draw neither tests nor writes depth or stencil
   // (RB_DEPTHCONTROL bits 0-1; with the Z test off the GPU writes no depth either): the emulator's draw logs of the HUD
   // show 00708734, 00700040 and 00700060 only.
-  if (targets.depth && targets.color_count && targets.depth->scale != targets.scale)
+  // fc4-nx (2026-11-11, the console's top-left quarter, from usf4-nx's "a depth target smaller than the colour target
+  // clips the draw"): by host size, not only at another scale. FC4 leaves a quarter-size pass's depth target bound for
+  // full-screen passes at 1x; on the Xbox both are EDRAM and nothing clips, on Maxwell rendering stops at the smallest
+  // attachment: only the top-left 640x352 was drawn and the rest kept old content.
+  if (targets.depth && targets.color_count)
     DropSmallerDepth(device, targets, vs->hash, ps ? ps->hash : 0);
   // banjo-nx (2026-10-20, NOT exact, banjo_renut_fur_shells = N > 1, the user's call): the fur family's meshes are drawn
   // once a shell, shell by shell (each shell draws every part of the body: RenderDoc of Ryujinx shows the same four
@@ -11730,7 +11751,11 @@ void ClearTargets(const Targets &t, u32 flags, const plume::RenderRect &rect, co
     return;
   // banjo-nx (2026-10-21, internal resolution): colour and depth targets of different scales (the HUD's UI target with
   // the scene's depth, the post-processing buffers at 1x with it) cleared one at a time, each at its own scale.
-  if (t.depth && t.color_count && t.depth->scale != t.scale) {
+  // fc4-nx (2026-11-11): and a depth target smaller than the colour targets at the same scale (Maxwell clears no further
+  // than the smallest attachment either; see DropSmallerDepth).
+  if (t.depth && t.color_count &&
+      (t.depth->scale != t.scale || t.depth->scale.Size(t.depth->width) < t.scale.Size(t.width) ||
+       t.depth->scale.Size(t.depth->height) < t.scale.Size(t.height))) {
     Targets colors = t;
     colors.depth = nullptr;
     if (flags & 0xF)

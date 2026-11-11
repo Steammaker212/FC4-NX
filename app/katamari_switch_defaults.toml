@@ -143,7 +143,10 @@ banjo_gpu_skip_dead_draws = true
 banjo_ring_vertex_lock_rule = false
 banjo_renderer = "renut"
 renut_gpu_backend = "deko3d"
-renut_post_process_precision = "Game"
+# fc4-nx (2026-11-11, hw14): High, as on PC. With Game, FC4's 640x352 8_8_8_8 views of EDRAM it also binds as a float
+# HDR target got a separate RGBA8 host target (banjo_renut_view_float16 joins only 64-bit views): the console's white
+# grass and cyan-white rock, reproduced on PC with --renut_post_process_precision=Game (run pcgame1).
+renut_post_process_precision = "High"
 banjo_renut_blend_skip = false
 banjo_renut_alpha_to_mask_test = true
 banjo_renut_depth_words_stencil = true
@@ -204,10 +207,10 @@ banjo_renut_store_cards = true
 banjo_renut_cpu_memos = true
 banjo_renut_pipeline_memo = true
 renut_gpu_profile = 0.0
-# fc4-nx (2026-11-11, hw13 diagnostic run): one traced frame every 8 s with resolve probes (noise frames), and the
+# fc4-nx (2026-11-11, hw13/hw14 diagnostic runs): one traced frame every 20 s (8 in hw13) with resolve probes (noise frames), and the
 # luminance readback values (exposure). A short hitch at each traced frame.
 banjo_renut_diag_resolve_trace = true
-banjo_renut_diag_resolve_trace_every_s = 8
+banjo_renut_diag_resolve_trace_every_s = 20
 banjo_renut_diag_readback_stats = true
 banjo_renut_diag_gpu_shaders = false
 target_refreshRate = -1
