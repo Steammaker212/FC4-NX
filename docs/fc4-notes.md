@@ -754,6 +754,11 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   three 1280x704 G-buffer resolves read 0.96 / 1.0 in every channel at the centre (normal frames ~0.38 / 0.62 / 0.07),
   which is FC4's G-buffer clear (colour 1 1 1 1): nothing drawn there, 75 draws into the G-buffer against ~124 in a
   good frame. Geometry (the ground) missing, with black stair-step blocks: the height map (64x64 16_16 tiles into an
-  atlas) is the suspect. "Draw dropped" now logs its running count at powers of two past 16. (The red tint in those runs is the player burning: gameplay.)
+  atlas) is the suspect. "Draw dropped" now logs its running count at powers of two past 16.
+- Still open (pcfinal3, pcnokeep): no draw dropped in those frames, and banjo_renut_keep_unused_targets=false keeps
+  the white-out. After the respawn the player lies looking up, so a G-buffer at its clear value there may simply be
+  sky: then it is the sky (and the stair-step blocks its low-resolution parts) coming out white, i.e. the sky or
+  exposure path, not missing ground. hw13's console traces settle which: probes of the G-buffer resolves at 1.0
+  (nothing drawn) or at normal values with a high c48.z (exposure). (The red tint in those runs is the player burning: gameplay.)
 - PC bisect runs need the menu input that survives the Xbox Live popup: `44:DOWN,45:A,52:DOWN,54:A` (a popup
   swallows DOWN; the menu's cursor starts on Continue (Online), one DOWN is Continue (Offline)).
