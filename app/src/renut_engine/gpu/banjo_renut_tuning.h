@@ -226,7 +226,9 @@ void CountDepthOnly();
 bool RecordWorkerAbOn();
 void CountDepthWords(bool viewed);
 // banjo_deko3d_draw_resolves (2026-10-18): colour resolves drawn instead of copied on deko3d.
-[[gnu::always_inline]] inline bool DrawResolvesOn() { return Latch().draw_resolves; }
+[[gnu::always_inline]] inline bool DrawResolvesOn() {
+  return Latch().draw_resolves && g_ab_off.load(std::memory_order_relaxed) != 73;  // fc4-nx: A/B target 73
+}
 // 2026-10-18, a census: binds of a depth resolve's float (R32F) target, not its words.
 void CountDepthFloatSampled();
 // banjo_deko3d_depth_compression / banjo_deko3d_zcull (2026-10-18): read before the deko3d device is made.

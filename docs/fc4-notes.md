@@ -798,3 +798,17 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   hw15: banjo_deko3d_discard_clears (Deko3DOptions::discardClears) clears a new render / depth target (bound alone,
   then the list's framebuffer again) wherever Renut discards one (new surfaces, resolve destinations, depth words).
 - hw15 has the trace off (banjo_renut_diag_resolve_trace false).
+
+## Console run hw15 (2026-11-11) and the hw16 self-test
+- hw15 (fc4.log from 08:49, 9 clips in out/switch_runs/hw15/album): improved (the tutorial cards load faster with the
+  trace off) but the noise frames remain, ~15 % of clip frames by the metric; their look is the same every time
+  (purple / yellow stripes above, teal blocks along the ground), with particles and the HUD drawn clean over them.
+  No GPU allocation failed; the texture reserve is under pressure all run (budget ~830-875 MB, 768 MB reserve).
+- ReCoD4 (github.com/DevZer0D4Y/ReCoD4) is the PC CoD4 source (KisakCOD) on iOS, not an Xbox 360 recompilation:
+  nothing for Xenos / EDRAM.
+- hw16 measures it on the console: banjo_renut_diag_noise_probe reads back a 256x32 band of each frame's last
+  full-screen 8_8_8_8 resolve (the front-buffer copy) and counts purple / yellow noise, by the in-run A/B state;
+  banjo_renut_ab_targets "71,72,73,74,14,18,39" at 5 s halves. New A/B targets: 71 banjo_deko3d_barrier_lean (plume's
+  missing image invalidation before writes and Renut's read-to-read transitions), 72 banjo_deko3d_barrier_merge, 73
+  banjo_deko3d_draw_resolves, 74 banjo_deko3d_discard_clears. The A/B left a plume flag target (39, 68) off when its
+  list moved on: AbApply now sets all of them as configured first. PC: 0.1 % (a few hits on fire), the console ~15 %.

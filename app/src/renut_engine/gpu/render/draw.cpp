@@ -71,6 +71,10 @@ REXCVAR_DEFINE_BOOL(banjo_renut_resolve_fixed_clamp_signed, true, "Banjo/Renut",
                     "(FC4's 64x64 16_16 luminance); false: those copied as before, the bias at the bind");
 REXCVAR_DEFINE_INT32(banjo_renut_diag_skip_depth_only, 0, "Banjo/Diagnostics",
                      "fc4-nx (2026-11-10): depth-only draws into depth targets of this width are not drawn (0: off)");
+REXCVAR_DEFINE_BOOL(banjo_renut_diag_noise_probe, false, "Banjo/Diagnostics",
+                    "fc4-nx (2026-11-11): each frame's last full-screen 8_8_8_8 resolve is read back (a 256x32 band) "
+                    "and checked for the console's purple / yellow noise; counted by the in-run A/B state "
+                    "(banjo_renut_ab_targets) and logged every 10 s (\"[noise]\")");
 REXCVAR_DEFINE_BOOL(banjo_renut_diag_trace_probes, true, "Banjo/Diagnostics",
                     "fc4-nx (2026-11-11): with banjo_renut_diag_resolve_trace, a traced frame's full-width colour "
                     "resolves are each sampled (a 96x64 patch at the centre, read back) and their mean and jitter "
@@ -12743,6 +12747,121 @@ void TraceProbeResolveLocked(HostTexture *dest, const d3d::TextureFetchConstant 
   g_trace_probe_pending = true;
 }
 
+// fc4-nx (2026-11-11, banjo_renut_diag_noise_probe): the console's noise frames counted by the renderer. Each frame's
+// last full-screen 8_8_8_8 colour resolve (the picture going to the front buffer) gets a 256x32 band above the middle
+// read back; three frames later the share of texels that are the noise's purple or yellow next to the other (or with a
+// large step) says whether that frame was a noise frame. Counted by the in-run A/B's state (banjo_renut_ab_targets:
+// all on, or which target is off), and logged every 10 s: one console run says which part makes the noise.
+struct NoiseProbe {
+  std::unique_ptr<plume::RenderBuffer> buffer;
+  uint64_t frame = 0;
+  int ab_off = 0;
+  bool pending = false;
+};
+constexpr u32 kNoiseProbes = 6, kNoiseW = 256, kNoiseH = 32;
+NoiseProbe g_noise_probes[kNoiseProbes];
+NoiseProbe *g_noise_frame_probe = nullptr;  // this frame's (replaced by a later resolve of the frame)
+uint64_t g_noise_probe_frame = ~0ull;
+bool g_noise_pending = false;
+struct NoiseCount {
+  uint64_t frames = 0, noisy = 0;
+};
+std::map<int, NoiseCount> g_noise_by_ab;  // key: the A/B target off in that frame (0: all on)
+NoiseCount g_noise_window;
+std::chrono::steady_clock::time_point g_noise_logged;
+
+void NoiseProbeReportLocked() {
+  const uint64_t now = TextureFrameLocked();
+  bool any = false;
+  for (NoiseProbe &p : g_noise_probes) {
+    if (!p.pending)
+      continue;
+    if (now < p.frame + 3) {
+      any = true;
+      continue;
+    }
+    p.pending = false;
+    const auto *data = static_cast<const uint8_t *>(p.buffer->map());
+    if (!data)
+      continue;
+    uint64_t hits = 0, total = 0;
+    auto purple = [](const uint8_t *t) { return t[0] > 120 && t[2] > 140 && t[1] + 30 < t[0] && t[1] + 30 < t[2]; };
+    auto yellow = [](const uint8_t *t) { return t[0] > 120 && t[1] > 120 && t[2] + 50 < t[0] && t[2] + 50 < t[1]; };
+    for (u32 y = 0; y < kNoiseH; y += 2) {
+      const uint8_t *row = data + size_t(y) * kNoiseW * 4;
+      for (u32 x = 0; x + 2 < kNoiseW; x += 2) {
+        const uint8_t *a = row + x * 4, *b = a + 8;
+        const bool pa = purple(a), ya = yellow(a), pb = purple(b), yb = yellow(b);
+        if ((pa && yb) || (ya && pb) ||
+            ((pa || ya) && std::abs(int(a[1]) - int(b[1])) + std::abs(int(a[2]) - int(b[2])) > 120))
+          ++hits;
+        ++total;
+      }
+    }
+    p.buffer->unmap();
+    const bool noisy = total && hits * 20 > total;  // over 5 %
+    NoiseCount &c = g_noise_by_ab[p.ab_off];
+    ++c.frames;
+    c.noisy += noisy;
+    ++g_noise_window.frames;
+    g_noise_window.noisy += noisy;
+  }
+  g_noise_pending = any;
+  const auto t = std::chrono::steady_clock::now();
+  if (t - g_noise_logged >= std::chrono::seconds(10) && g_noise_window.frames) {
+    g_noise_logged = t;
+    std::string by;
+    for (const auto &[off, c] : g_noise_by_ab)
+      by += fmt::format("; {} {}/{} ({:.0f} %)", off ? fmt::format("target {} off", off) : std::string("all on"),
+                        c.noisy, c.frames, 100.0 * double(c.noisy) / double(std::max<uint64_t>(c.frames, 1)));
+    RGPU_INFO("[noise] last 10 s: {} of {} frames noisy; whole run by A/B state{}", g_noise_window.noisy,
+              g_noise_window.frames, by);
+    g_noise_window = {};
+  }
+}
+
+void NoiseProbeResolveLocked(HostTexture *dest, const d3d::TextureFetchConstant *dest_format) {
+  static const bool on = REXCVAR_GET(banjo_renut_diag_noise_probe);
+  if (!on || !dest || !dest->texture || !dest_format || dest->width < 1280 || dest->height < 704 ||
+      dest->dimension != TextureDimension::Tex2D || dest->stacked ||
+      (dest->host_format != plume::RenderFormat::R8G8B8A8_UNORM) ||
+      TextureFetch::FromHeader(*dest_format).Format() != GpuTextureFormat::Fmt8_8_8_8)
+    return;
+  const uint64_t frame = TextureFrameLocked();
+  NoiseProbe *slot = g_noise_probe_frame == frame ? g_noise_frame_probe : nullptr;
+  if (!slot) {
+    for (NoiseProbe &p : g_noise_probes) {
+      if (!p.pending) {
+        slot = &p;
+        break;
+      }
+    }
+  }
+  if (!slot)
+    return;
+  auto &s = State();
+  if (!slot->buffer)
+    slot->buffer = s.device->createBuffer(plume::RenderBufferDesc::ReadbackBuffer(uint64_t(kNoiseW) * kNoiseH * 4));
+  if (!slot->buffer || !s.command_list)
+    return;
+  const u32 hw = dest->alloc_width ? dest->alloc_width : dest->width;
+  const u32 hh = dest->alloc_height ? dest->alloc_height : dest->height;
+  const int32_t x0 = int32_t(hw / 2 - kNoiseW / 2), y0 = int32_t(hh / 3);
+  TransitionTextureLocked(dest, plume::RenderTextureLayout::COPY_SOURCE);
+  const plume::RenderBox box(x0, y0, x0 + int32_t(kNoiseW), y0 + int32_t(kNoiseH));
+  s.command_list->copyTextureRegion(
+      plume::RenderTextureCopyLocation::PlacedFootprint(slot->buffer.get(), dest->host_format, kNoiseW, kNoiseH, 1,
+                                                        kNoiseW),
+      plume::RenderTextureCopyLocation::Subresource(dest->texture.get(), 0, 0), 0, 0, 0, &box);
+  TransitionTextureLocked(dest, plume::RenderTextureLayout::SHADER_READ);
+  slot->frame = frame;
+  slot->ab_off = banjo::renut_gpu::g_ab_off.load(std::memory_order_relaxed);
+  slot->pending = true;
+  g_noise_frame_probe = slot;
+  g_noise_probe_frame = frame;
+  g_noise_pending = true;
+}
+
 // A readback whose frame has passed becomes its kind's latest.
 void StoreReadbackLocked(ResolveReadback &r) {
   const uint32_t host_bytes = ReadbackHostBytes(r.host_format);
@@ -12933,6 +13052,8 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
     FlushResolveReadbacksLocked();  // fc4-nx (2026-11-10, banjo_renut_resolve_readback)
   if (g_trace_probe_pending)
     TraceProbeReportLocked();  // fc4-nx (2026-11-11, banjo_renut_diag_trace_probes)
+  if (g_noise_pending)
+    NoiseProbeReportLocked();  // fc4-nx (2026-11-11, banjo_renut_diag_noise_probe)
   if (REXCVAR_GET(banjo_renut_diag_cpu_reads))
     ReportCpuReadsLocked();
 
@@ -13137,6 +13258,8 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
           QueueResolveReadbackLocked(dest, dest_format, dest_rect, host_x, host_y, dest_x, dest_y, surface->scale);
         if (banjo::renut_gpu::ResolveTraceOn() && dest_level == 0 && slice == 0 && z == 0)
           TraceProbeResolveLocked(dest, dest_format);  // fc4-nx (2026-11-11, banjo_renut_diag_trace_probes)
+        if (dest_level == 0 && slice == 0 && z == 0)
+          NoiseProbeResolveLocked(dest, dest_format);  // fc4-nx (2026-11-11, banjo_renut_diag_noise_probe)
         static const auto watch_start = std::chrono::steady_clock::now();
         if (REXCVAR_GET(banjo_renut_diag_cpu_reads) && dest_format &&  // fc4-nx (2026-11-10, diagnostic)
             std::chrono::steady_clock::now() - watch_start >

@@ -248,3 +248,11 @@ katamari_hand_matrix_multiply = true
 katamari_hand_matrix_translation = true
 katamari_hand_sphere_box = false
 banjo_xma_frame_cache = false
+
+# fc4-nx (2026-11-11, hw16 diagnostic run): the renderer counts its noise frames (banjo_renut_diag_noise_probe) by the
+# in-run A/B's state, cycling the Switch-only parts that could leave stale data: 71 lean barriers, 72 merged barriers,
+# 73 drawn resolves, 74 discard clears, 14 the record worker, 18 eager kicks, 39 texture-bind skip. Each is off for
+# 5 s in turn; "[noise]" every 10 s gives each one's off-half noise against all-on.
+banjo_renut_diag_noise_probe = true
+banjo_renut_ab_targets = "71,72,73,74,14,18,39"
+banjo_renut_ab_s = 5

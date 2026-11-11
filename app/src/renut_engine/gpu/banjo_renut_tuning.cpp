@@ -925,6 +925,10 @@ const char *AbName(int target) {
   // katamari-nx (2026-10-30): Beautiful Katamari's CPU items (cpu/hot/banjo_hand_natives.h, cpu/banjo_hot_guest.h).
   case 69: return "Katamari's hand-written matrix natives (katamari_hand_matrix_*; off half: the generated copies)";
   case 70: return "the localized copies of the hot functions (localized.txt; off half: the generated originals)";
+  case 71: return "banjo_deko3d_barrier_lean (no texture-cache invalidation before writes; Renut's read-to-read transitions)";
+  case 72: return "banjo_deko3d_barrier_merge";
+  case 73: return "banjo_deko3d_draw_resolves (off half: copied)";
+  case 74: return "banjo_deko3d_discard_clears";
   default: return "none";
   }
 }
@@ -977,10 +981,16 @@ void AbApply(int target, bool on) {
   if (target == 27)
     renut::gpu::native::g_tags_apart = on && REXCVAR_GET(banjo_renut_tags_apart);
 #if defined(PLUME_DEKO3D)
-  if (target == 39)  // banjo-nx (2026-10-27): plume's flag
-    plume::Deko3DSetTextureSkip(on && REXCVAR_GET(banjo_deko3d_texture_skip));
-  if (target == 68)  // banjo-nx (2026-10-28): plume's flag
-    plume::Deko3DSetProvisionalCount(on && REXCVAR_GET(banjo_deko3d_provisional_count));
+  // fc4-nx (2026-11-11): plume's flags all as configured first (a list moving to its next target left the last one's
+  // flag off), then the target's as the half says.
+  const bool skip = REXCVAR_GET(banjo_deko3d_texture_skip), count = REXCVAR_GET(banjo_deko3d_provisional_count);
+  const bool lean = REXCVAR_GET(banjo_deko3d_barrier_lean), merge = REXCVAR_GET(banjo_deko3d_barrier_merge);
+  const bool clears = REXCVAR_GET(banjo_deko3d_discard_clears);
+  plume::Deko3DSetTextureSkip(skip && (on || target != 39));  // banjo-nx (2026-10-27): plume's flag
+  plume::Deko3DSetProvisionalCount(count && (on || target != 68));  // banjo-nx (2026-10-28): plume's flag
+  plume::Deko3DSetLeanBarriers(lean && (on || target != 71));
+  plume::Deko3DSetMergeBarriers(merge && (on || target != 72));
+  plume::Deko3DSetDiscardClears(clears && (on || target != 74));
 #endif
   if (target == 1) {
     plume::SetVulkanPreciseBarriers(on && g_precise_barriers_on);
@@ -1395,7 +1405,9 @@ bool Deko3DStripRestartOn() { return REXCVAR_GET(banjo_deko3d_strip_restart); }
 bool Deko3DGpuRegionOn() { return REXCVAR_GET(banjo_deko3d_gpu_region); }
 uint32_t Deko3DGpuRegionMaxMb() { return uint32_t(REXCVAR_GET(banjo_deko3d_gpu_region_max_mb)); }
 bool Deko3DBarrierMergeOn() { return REXCVAR_GET(banjo_deko3d_barrier_merge); }
-bool Deko3DBarrierLeanOn() { return REXCVAR_GET(banjo_deko3d_barrier_lean); }
+bool Deko3DBarrierLeanOn() {
+  return REXCVAR_GET(banjo_deko3d_barrier_lean) && g_ab_off.load(std::memory_order_relaxed) != 71;
+}
 bool Deko3DVtxDedupeOn() { return REXCVAR_GET(banjo_deko3d_vtx_dedupe); }
 bool Deko3DTextureSkipOn() { return REXCVAR_GET(banjo_deko3d_texture_skip); }  // banjo-nx (2026-10-27)
 bool Deko3DProvisionalCountOn() { return REXCVAR_GET(banjo_deko3d_provisional_count); }  // banjo-nx (2026-10-28)

@@ -384,6 +384,11 @@ namespace plume {
         g_texSkip = on;
     }
 
+    // fc4-nx (2026-11-11): the in-run A/B's switches of three options (read by the recording thread as it goes).
+    void Deko3DSetLeanBarriers(bool on) { g_deko3dOptions.leanBarriers = on; }
+    void Deko3DSetMergeBarriers(bool on) { g_deko3dOptions.mergeBarriers = on; }
+    void Deko3DSetDiscardClears(bool on) { g_deko3dOptions.discardClears = on; }
+
     void Deko3DSharedLinesWritten(RenderCommandList *commandList, uint32_t lines) {
         if (commandList)
             static_cast<Deko3DCommandList *>(commandList)->texLinesWritten |= lines;
