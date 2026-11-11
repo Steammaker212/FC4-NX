@@ -237,6 +237,7 @@ bool Deko3DMsaaPositionsOn();
 bool Deko3DA2cDitherOn();
 bool Deko3DStripRestartOn();
 bool Deko3DGpuRegionOn();  // banjo-nx (2026-10-28, h10): banjo_deko3d_gpu_region
+uint32_t Deko3DGpuRegionMaxMb();  // fc4-nx (2026-11-11): banjo_deko3d_gpu_region_max_mb
 // banjo_deko3d_barrier_merge / _lean (2026-10-19, GPU): fewer pipeline drains and texture cache invalidations.
 bool Deko3DBarrierMergeOn();
 bool Deko3DBarrierLeanOn();

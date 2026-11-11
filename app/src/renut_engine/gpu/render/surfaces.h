@@ -71,6 +71,8 @@ struct HostSurface {
   uint64_t key = 0;
   uint64_t write_seq = 0;
   uint64_t transfer_seq = 0;
+  // fc4-nx (2026-11-11, banjo_renut_keep_unused_targets): the frame its last surface header left it (0: in use).
+  uint64_t unused_frame = 0;
   plume::RenderFormat format = plume::RenderFormat::UNKNOWN;
   plume::RenderSampleCounts samples = plume::RenderSampleCount::COUNT_1;
 
@@ -173,6 +175,9 @@ void ColorAliasesLocked(const HostSurface *surface, std::vector<HostSurface *> &
 // pitch, samples, scale), or null; and the counter that orders the targets' writes.
 HostSurface *ColorOverDepthLocked(const HostSurface *depth);
 uint64_t NextSurfaceWriteSeq();
+// fc4-nx (2026-11-11, banjo_renut_keep_unused_targets): targets no surface header names, idle long enough (or a
+// shorter while under memory pressure), go. Called once a frame with the render lock held.
+void ReapUnusedTargetsLocked(bool pressure);
 
 // fc4-nx (2026-11-10): for a 4x-MSAA colour target, the 1x target of the same host format and scale drawn over the
 // same EDRAM base at twice its pitch (FC4 resolves its 1280x704 HDR scene through a 640x352 4x view: the console's

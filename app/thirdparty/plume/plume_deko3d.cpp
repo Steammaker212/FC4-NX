@@ -75,6 +75,12 @@ namespace plume {
     // old path (newlib). No logging under g_regionMutex (battd: a log line that allocates deadlocked its arena lock).
     static bool g_regionOn = true;
     void Deko3DSetGpuRegion(bool on) { g_regionOn = on; }
+    // fc4-nx (2026-11-11, hw11 out of memory again): a cap on the region (Deko3DSetGpuRegionMax). The boot's texture
+    // burst grew it to 1,642 MB in one loading frame; regionReleaseLocked could not shrink it (a live block at its
+    // bottom), so 750 MB stayed free inside it while the guest heap's commits failed. Past the cap a block takes the
+    // heap path, and an image chunk made there goes back to newlib as ordinary free memory once emptied.
+    static uint64_t g_regionMax = 0;
+    void Deko3DSetGpuRegionMax(uint64_t bytes) { g_regionMax = bytes; }
     static constexpr uint64_t kRegionMinBlock = 64ull << 10, kRegionGrain = 64ull << 10, kRegionStep = 2ull << 20;
     static constexpr uint64_t kRegionNewlibSlack = 32ull << 20, kRegionGiveBackAt = 128ull << 20, kRegionKeep = 64ull << 20;
     static std::mutex g_regionMutex;
@@ -1106,7 +1112,9 @@ namespace plume {
                 }
                 if (g_region.high) {
                     const uint32_t before = g_region.growths;
-                    at = g_region.alloc(span, kRegionStep, [](uintptr_t low) { return regionMoveHeapEnd(low, true); });
+                    at = g_region.alloc(span, kRegionStep, [](uintptr_t low) {
+                        return (!g_regionMax || g_region.high - low <= g_regionMax) && regionMoveHeapEnd(low, true);
+                    });
                     grew = g_region.growths != before;
                     growths = g_region.growths;
                     regionSize = g_region.high - g_region.low;

@@ -484,6 +484,7 @@ void InstallShaderCache() {
 #endif
   plume::Deko3DSetBindTrace(REXCVAR_GET(banjo_deko3d_bind_trace));  // fc4-nx (2026-11-10)
   plume::Deko3DSetGpuRegion(Deko3DGpuRegionOn());  // banjo-nx (2026-10-28, h10)
+  plume::Deko3DSetGpuRegionMax(uint64_t(Deko3DGpuRegionMaxMb()) << 20);  // fc4-nx (2026-11-11)
   plume::Deko3DSetVertexBufferDedupe(Deko3DVtxDedupeOn());  // banjo-nx (2026-10-26, Unleashed-style step 2)
   plume::Deko3DSetTextureSkip(Deko3DTextureSkipOn());       // banjo-nx (2026-10-27, render thread night)
   plume::Deko3DSetProvisionalCount(Deko3DProvisionalCountOn());  // banjo-nx (2026-10-28, render-thread round)

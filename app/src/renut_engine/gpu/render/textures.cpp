@@ -25,6 +25,7 @@
 #include <atomic>
 #include "renut_engine/gpu/render/draw.h"
 #include "renut_engine/gpu/render/graphics_options.h"
+#include "renut_engine/gpu/render/surfaces.h"  // fc4-nx (2026-11-11): ReapUnusedTargetsLocked
 #include "renut_engine/gpu/backend/video.h"
 
 #include <rex/cvar.h>
@@ -1114,6 +1115,7 @@ void AdvanceTextureFrameLocked() {
     ReleaseStaleResolvePagesLocked();
   if (g_relief_requested.load(std::memory_order_relaxed) && g_relief_requested.exchange(false))
     ReleaseForReliefLocked();
+  ReapUnusedTargetsLocked(g_memory_pressure);  // fc4-nx (2026-11-11, banjo_renut_keep_unused_targets)
   if (g_frame % kEvictCheckFrames == 0)
     EvictIdleTexturesLocked();
   // banjo-nx: banjo_renut_memory_policy. Every kColdCheckFrames frames, and under pressure every second.

@@ -31,6 +31,11 @@
 #include <rex/ui/switch_saltynx.h>  // banjo-nx (2026-10-21): the console's mode, Reverse-NX obeyed
 #endif
 
+REXCVAR_DEFINE_BOOL(banjo_renut_keep_unused_targets, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-11): a render target no surface header names any more keeps its image (EDRAM keeps "
+                    "its bytes on the console) until it has been idle 300 frames (30 under memory pressure). Renut "
+                    "destroyed it at once: Far Cry 4 points its headers at other views between passes, and the target "
+                    "made again had no content (the console showed stale image-heap bytes: noise frames)");
 REXCVAR_DEFINE_BOOL(banjo_renut_resolve_extents, true, "Banjo/Renut",
                     "fc4-nx (2026-11-10): a resolve whose rect reaches past its target's edge (up to twice its size) "
                     "makes every target of that view's shape that large from its next use. Far Cry 4 tiles its "
@@ -132,6 +137,7 @@ std::unordered_map<uint64_t, std::unique_ptr<HostSurface>> g_targets;
 // Surface VA -> its target's key, and how many surfaces use each target.
 std::unordered_map<u32, uint64_t> g_surface_keys;
 std::unordered_map<uint64_t, uint32_t> g_target_users;
+uint64_t g_targets_kept = 0, g_targets_reused = 0, g_targets_reaped = 0;  // fc4-nx (2026-11-11)
 std::vector<CachedFramebuffer> g_framebuffers;
 // banjo-nx (2026-10-19, render-thread proposal 8): the last framebuffers looked up, checked before the search of every
 // framebuffer made (a linear search with an 80-byte compare at every draw's BindTargets); emptied whenever a cached
@@ -680,9 +686,50 @@ void UnuseTarget(uint64_t key) {
   g_target_users.erase(users);
   ++g_surface_epoch;
   if (auto it = g_targets.find(key); it != g_targets.end()) {
+    // fc4-nx (2026-11-11, banjo_renut_keep_unused_targets): kept, with its image, until ReapUnusedTargetsLocked.
+    static const bool keep = REXCVAR_GET(banjo_renut_keep_unused_targets);
+    if (keep && it->second && it->second->texture) {
+      it->second->unused_frame = std::max<uint64_t>(TextureFrameLocked(), 1);
+      ++g_targets_kept;
+      return;
+    }
     RetireTarget(*it->second);
     g_targets.erase(it);
   }
+}
+
+void ReapUnusedTargetsLocked(bool pressure) {
+  const uint64_t frame = TextureFrameLocked();
+  if (frame % 30)
+    return;
+  const uint64_t idle = pressure ? 30 : 300;
+  uint64_t held_bytes = 0;
+  uint32_t held = 0, reaped = 0;
+  for (auto it = g_targets.begin(); it != g_targets.end();) {
+    HostSurface *t = it->second.get();
+    if (!t || !t->unused_frame || g_target_users.count(it->first)) {
+      if (t)
+        t->unused_frame = 0;
+      ++it;
+      continue;
+    }
+    if (frame - t->unused_frame >= idle) {
+      RetireTarget(*t);
+      it = g_targets.erase(it);
+      ++reaped;
+      ++g_surface_epoch;
+      continue;
+    }
+    ++held;
+    held_bytes += uint64_t(t->scale.Size(t->width)) * t->scale.Size(t->height) * 4u;
+    ++it;
+  }
+  g_targets_reaped += reaped;
+  if (frame % 300 == 0 && (g_targets_kept || g_targets_reaped))
+    RGPU_INFO("[renut] targets (banjo_renut_keep_unused_targets): {} left by their last header and kept, {} taken up "
+              "again, {} reaped{}; {} unused now (~{} MB)", std::exchange(g_targets_kept, 0),
+              std::exchange(g_targets_reused, 0), std::exchange(g_targets_reaped, 0), pressure ? " (memory pressure)" : "",
+              held, held_bytes >> 20);
 }
 
 HostSurface *FindHostSurfaceLocked(u32 surface_va) {
@@ -962,6 +1009,10 @@ HostSurface *GetHostSurfaceSlow(u32 surface_va, const d3d::SurfaceDesc *desc) {
   }
 
   auto &slot = g_targets[key];
+  if (slot && slot->unused_frame) {  // fc4-nx (2026-11-11, banjo_renut_keep_unused_targets): its image as left
+    slot->unused_frame = 0;
+    ++g_targets_reused;
+  }
   // The view's target covers every surface over it, and every tile while
   // tiling (SetTilingExtentLocked).
   uint32_t min_width = std::max(g_tiling_width, d3d::SurfaceWidth(desc->Size));

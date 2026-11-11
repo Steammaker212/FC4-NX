@@ -503,6 +503,12 @@ REXCVAR_DEFINE_BOOL(banjo_deko3d_gpu_region, true, "Banjo/Enhancements",
                     "and more from a region of their own at the heap's top, growing down as needed, not from the heap "
                     "among every small allocation (where freed blocks were cut up: 577 MB free and no 32 MB piece). "
                     "Same pixels");
+REXCVAR_DEFINE_INT32(banjo_deko3d_gpu_region_max_mb, 1024, "Banjo/Enhancements",
+                     "fc4-nx (2026-11-11, hw10/hw11 out of memory): the GPU region grows no larger than this; blocks past it "
+                     "come from the heap as before banjo_deko3d_gpu_region. Far Cry 4's boot made 1.4 GB of textures in one "
+                     "loading frame, the region grew to 1,642 MB and kept 750 MB free that the guest heap could not use; "
+                     "image chunks from the heap go back to it when emptied. 0: no cap")
+    .range(0, 4096);
 REXCVAR_DEFINE_BOOL(banjo_renut_cache_save_quiet, true, "Banjo/Enhancements",
                     "Renut's renderer (package 28; as Unleashed saves its pipeline cache at loading screens): the "
                     "pipeline cache is saved once no pipeline was built for 15 s (and at most once a minute; after "
@@ -1381,6 +1387,7 @@ bool Deko3DMsaaPositionsOn() { return REXCVAR_GET(banjo_deko3d_msaa_positions); 
 bool Deko3DA2cDitherOn() { return REXCVAR_GET(banjo_deko3d_a2c_dither); }
 bool Deko3DStripRestartOn() { return REXCVAR_GET(banjo_deko3d_strip_restart); }
 bool Deko3DGpuRegionOn() { return REXCVAR_GET(banjo_deko3d_gpu_region); }
+uint32_t Deko3DGpuRegionMaxMb() { return uint32_t(REXCVAR_GET(banjo_deko3d_gpu_region_max_mb)); }
 bool Deko3DBarrierMergeOn() { return REXCVAR_GET(banjo_deko3d_barrier_merge); }
 bool Deko3DBarrierLeanOn() { return REXCVAR_GET(banjo_deko3d_barrier_lean); }
 bool Deko3DVtxDedupeOn() { return REXCVAR_GET(banjo_deko3d_vtx_dedupe); }

@@ -692,3 +692,22 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   - GPU clock: sys-clk accepted fc4_clock_gpu_mhz 768 but the console ran at 614.4 MHz handheld (sys-clk's own cap).
 - Switch hw11 NRO (D:\switch\fc4-nx\fc4-nx.nro, hw10 kept as fc4-nx.hw10.nro.bak; ELF out/switch_runs/renut_hw11.elf):
   the crash fixes and the hand-over change above. hw10's 21 clips are in out/switch_runs/hw10/album (deleted from SD).
+
+## Console run hw11 (2026-11-11): freeze at the first weapon, noise frames
+- **Freeze:** the same guest heap exhaustion as hw10 (`AllocFixed: could not commit 0x10000 ... backing 674 MB`, from
+  01:01:59; the game thread stalled on the commits at 01:03:36, no crash report). hw11's give-back never ran: the region
+  still grew from 326 to 1,638 MB in 4.3 s inside one loading frame (00:42:50.8 - 55.1; no texture check can run in
+  it), and after the eviction the emptied chunks (64 MiB given back nine times) were never at its bottom: 0 givebacks,
+  742 MB free inside the region, newlib's room 2 MB.
+  Fix: `banjo_deko3d_gpu_region_max_mb` (1024): the region grows no further; blocks past it take the heap path, and an
+  image chunk made there is ordinary newlib memory once emptied (released when the room is short or on the guest
+  heap's pressure callback). Gameplay held 755-900 MB of blocks in the region.
+- **Noise frames (dinner, De Pleur's mansion):** UnuseTarget destroyed a render target the moment no surface header
+  named its EDRAM view, and the next header naming it got a new, empty one. PC run pckeep1 counted 900 such targets in
+  300 frames: 3 render targets destroyed and made again every frame. On PC a new texture comes up zeroed; deko3d's image
+  heap hands out stale bytes (the noise, herringbone patterns of other textures, the quarter-size half-res pass left
+  in the top-left of a target). `banjo_renut_keep_unused_targets` (on): the target keeps its image until idle 300
+  frames (30 under memory pressure); the "[renut] targets" line counts kept / taken up again / reaped every 300 frames.
+  PC picture unchanged (its near-objects-dark is the D3D12 reversed viewport depth range, above).
+- hw11 clips: outdoor cutscenes right at 30 fps; dinner lit on the console (unlike PC) but overexposed, with noise
+  frames; the mansion gameplay ~50 % noise frames; fps 7-30 (median 17.5).

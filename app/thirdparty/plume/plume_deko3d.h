@@ -807,6 +807,8 @@ namespace plume {
     // banjo-nx (2026-10-28, h10): GPU memory blocks from a region of their own at the heap's top (plume_deko3d.cpp,
     // "The GPU region"); on by default, set before the device is made. Its figures for the memory report.
     void Deko3DSetGpuRegion(bool on);
+    // fc4-nx (2026-11-11): the region's largest size in bytes (0: none); blocks past it take the heap path.
+    void Deko3DSetGpuRegionMax(uint64_t bytes);
     struct Deko3DGpuRegionInfo {
         bool on = false;
         uint64_t size = 0, used = 0, peak = 0, freeBytes = 0, largestFree = 0, givenBack = 0, refused = 0;
