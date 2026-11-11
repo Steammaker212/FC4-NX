@@ -14,12 +14,19 @@
 #define UTILITY_OWN_TEXTURE_TABLE
 #include "utility.hlsli"
 
+// fc4-nx (2026-11-10): D3D12 reads a depth-stencil texture's stencil plane in .y (X32_TYPELESS_G8X24_UINT), Vulkan and
+// deko3d a stencil-aspect view in .x.
+#if defined(__spirv__)
+#define RENUT_STENCIL_COMPONENT x
+#else
+#define RENUT_STENCIL_COMPONENT y
+#endif
 #if DEPTH_RESOLVE_MS
 Texture2DMS<float> g_Depth[] : register(t0, space0);
-Texture2DMS<uint> g_Stencil[] : register(t0, space2);
+Texture2DMS<uint2> g_Stencil[] : register(t0, space2);
 #else
 Texture2D<float> g_Depth[] : register(t0, space0);
-Texture2D<uint> g_Stencil[] : register(t0, space2);
+Texture2D<uint2> g_Stencil[] : register(t0, space2);
 #endif
 
 struct PSInput
@@ -60,11 +67,11 @@ PSOutput main(PSInput input)
 #if DEPTH_RESOLVE_MS
     const float depth = g_Depth[index].Load(texel, 0);
     if (g_Push.param1 != 0.0)
-        stencil = g_Stencil[NonUniformResourceIndex(g_Push.samplerIndex)].Load(texel, 0) & 0xFF;
+        stencil = g_Stencil[NonUniformResourceIndex(g_Push.samplerIndex)].Load(texel, 0).RENUT_STENCIL_COMPONENT & 0xFF;
 #else
     const float depth = g_Depth[index].Load(int3(texel, 0));
     if (g_Push.param1 != 0.0)
-        stencil = g_Stencil[NonUniformResourceIndex(g_Push.samplerIndex)].Load(int3(texel, 0)) & 0xFF;
+        stencil = g_Stencil[NonUniformResourceIndex(g_Push.samplerIndex)].Load(int3(texel, 0)).RENUT_STENCIL_COMPONENT & 0xFF;
 #endif
     const uint word = ((g_Push.param0 != 0.0 ? EncodeFloat20e4(depth) : EncodeUnorm24(depth)) << 8) | stencil;
 

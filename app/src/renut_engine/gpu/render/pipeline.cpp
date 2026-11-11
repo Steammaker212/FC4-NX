@@ -28,6 +28,10 @@
 // banjo-nx (2026-10-17, deko3d renderer): every graphics pipeline's shaders and specialization constants, one line each,
 // for tools/deko3d_variant_cache.py (the DKSH cache of the deko3d back end, compiled on the PC). Any back end: the
 // constants are the renderer's. Written next to the executable.
+REXCVAR_DEFINE_INT32(banjo_renut_diag_gbuffer_tests, 0, "Banjo/Diagnostics",
+                     "fc4-nx (2026-11-10, a test): pipelines drawing into 3 colour targets with depth: 1 depth test "
+                     "off, 2 stencil test off, 3 both (with banjo_renut_pipeline_cache = false)")
+    .range(0, 3);
 REXCVAR_DEFINE_BOOL(banjo_deko3d_variant_log, false, "Banjo/Renut",
                     "Write deko3d_variants.txt next to the executable: each graphics pipeline's vertex and pixel shader "
                     "and specialization constants (tools/deko3d_variant_cache.py builds the deko3d DKSH cache from it)");
@@ -344,6 +348,13 @@ std::unique_ptr<plume::RenderPipeline> Build(const PipelineKey &key, const Pipel
     } else {
       desc.stencilBackFace = desc.stencilFrontFace;
     }
+  }
+  if (const int tests = REXCVAR_GET(banjo_renut_diag_gbuffer_tests);
+      tests && key.color_count == 3 && key.depth_format != plume::RenderFormat::UNKNOWN) {
+    if (tests & 1)
+      desc.depthFunction = plume::RenderComparisonFunction::ALWAYS;
+    if (tests & 2)
+      desc.stencilEnabled = false;
   }
   desc.depthTargetFormat = key.depth_format;
 

@@ -13,5 +13,9 @@ float4 main(float4 position : SV_Position) : SV_Target0
     // exponent bias (param1 = 2^bias), clamped to 0..1 (unsigned).
     if (g_Push.param1 > 0.0)
         color = saturate(color * g_Push.param1);
+    // fc4-nx (2026-11-10): param1 < 0, such a resolve into a texture fetched as integers (num_format 1): the value
+    // times the bias, unclamped (the integer the console stores; the fetch's exponent adjust brings it back).
+    else if (g_Push.param1 < 0.0)
+        color *= -g_Push.param1;
     return color;
 }

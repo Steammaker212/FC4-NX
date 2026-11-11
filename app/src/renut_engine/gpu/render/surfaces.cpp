@@ -717,6 +717,20 @@ void ColorAliasesLocked(const HostSurface *surface, std::vector<HostSurface *> &
   }
 }
 
+HostSurface *ColorOverDepthLocked(const HostSurface *depth) {
+  if (!depth || !depth->depth || !depth->key)
+    return nullptr;
+  // TargetKey: EDRAM base 0-11, pitch 12-25, samples 26-27, depth 28, scale 29-31, host format above.
+  const uint64_t want = (depth->key & 0xEFFFFFFFull) | uint64_t(u32(plume::RenderFormat::R8G8B8A8_UNORM)) << 32;
+  auto it = g_targets.find(want);
+  return it != g_targets.end() && it->second && !it->second->depth ? it->second.get() : nullptr;
+}
+
+uint64_t NextSurfaceWriteSeq() {
+  static uint64_t seq = 0;
+  return ++seq;
+}
+
 HostSurface *DownsampleSourceLocked(const HostSurface *surface) {
   if (!surface || surface->depth || surface->samples != plume::RenderSampleCount::COUNT_4)
     return nullptr;
@@ -967,6 +981,7 @@ HostSurface *GetHostSurfaceSlow(u32 surface_va, const d3d::SurfaceDesc *desc) {
     slot->info_word = desc->SurfaceInfo;
     slot->format_word = desc->Format;
     slot->tiled = tiled;
+    slot->key = key;
     if (slot->width >= min_width && slot->height >= min_height && slot->scale == scale)
       return slot.get();
     // A larger surface over the view, or a larger tiling: grow it, keeping
@@ -981,6 +996,7 @@ HostSurface *GetHostSurfaceSlow(u32 surface_va, const d3d::SurfaceDesc *desc) {
   }
   ++g_surface_epoch;
   slot->tiled = tiled;
+  slot->key = key;
   if (!BuildTarget(*slot, *desc, min_width, min_height, scale))
     return nullptr;
   // No defined content yet; D3D12 wants a new target discarded (or cleared)
@@ -1054,7 +1070,8 @@ uint32_t SurfaceSampleSlotLocked(HostSurface *surface) {
 // banjo-nx (2026-10-18): the bindless slot of a depth/stencil target's stencil view (read as uint by the depth
 // resolve), or kInvalidDescriptor (no stencil, D3D12, or no view). Tried once a surface.
 uint32_t SurfaceStencilSlotLocked(HostSurface *surface) {
-  if (!surface || !surface->texture || !UsesVulkanBindings() || !plume::RenderFormatIsStencil(surface->format))
+  // fc4-nx (2026-11-10): D3D12 too (plume_d3d12: an S8_UINT view reads the stencil plane).
+  if (!surface || !surface->texture || !plume::RenderFormatIsStencil(surface->format))
     return kInvalidDescriptor;
   if (surface->stencil_slot != UINT32_MAX)
     return surface->stencil_slot;

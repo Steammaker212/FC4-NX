@@ -66,6 +66,11 @@ struct HostSurface {
   // fc4-nx (2026-11-10, banjo_renut_resolve_extents): made larger than its surfaces for a tiled pass (one target for
   // every tile): draws in a later tile's window offset are not drawn again (ComputeViewportSlow).
   bool tiled = false;
+  // fc4-nx (2026-11-10, banjo_renut_color_to_depth): its TargetKey; NextSurfaceWriteSeq at its last write (draw or
+  // clear); for a depth target, the colour target's write_seq its depth was last taken from (edram_transfer.cpp).
+  uint64_t key = 0;
+  uint64_t write_seq = 0;
+  uint64_t transfer_seq = 0;
   plume::RenderFormat format = plume::RenderFormat::UNKNOWN;
   plume::RenderSampleCounts samples = plume::RenderSampleCount::COUNT_1;
 
@@ -164,6 +169,10 @@ HostSurface *FindHostSurfaceLocked(u32 surface_va);
 // pitch, samples and scale), in another host format: on the console one
 // memory, so what a clear writes through one is what the others then hold.
 void ColorAliasesLocked(const HostSurface *surface, std::vector<HostSurface *> &out);
+// fc4-nx (2026-11-10, banjo_renut_color_to_depth): the 8_8_8_8 colour target over a depth target's EDRAM (same base,
+// pitch, samples, scale), or null; and the counter that orders the targets' writes.
+HostSurface *ColorOverDepthLocked(const HostSurface *depth);
+uint64_t NextSurfaceWriteSeq();
 
 // fc4-nx (2026-11-10): for a 4x-MSAA colour target, the 1x target of the same host format and scale drawn over the
 // same EDRAM base at twice its pitch (FC4 resolves its 1280x704 HDR scene through a 640x352 4x view: the console's

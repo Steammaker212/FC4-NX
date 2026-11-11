@@ -1170,18 +1170,30 @@ HostTexture *FindHostTextureLocked(u32 texture_va) {
 
 // fc4-nx (2026-11-10, diagnostics): also the resolve destinations held under their base page's key
 // (banjo_renut_resolve_any_size), by the header address they were last resolved for. A walk of every texture.
+HostTexture *FindResolveTargetLocked(u32 base_page);
+
 HostTexture *FindHostTextureAnyLocked(u32 texture_va) {
   if (HostTexture *t = FindHostTextureLocked(texture_va))
     return t;
   for (auto &[key, t] : g_textures)
     if (t && t->guest_va == texture_va)
       return t.get();
+  // fc4-nx (2026-11-10): a resolve destination held by its base page (banjo_renut_resolve_any_size).
+  if (const auto *header = GuestPtr<const d3d::BaseTexture>(texture_va))
+    return FindResolveTargetLocked(u32(header->Format.dword[1]) >> 12);
   return nullptr;
 }
 
 // fc4-nx (2026-11-09): the last resolve destination into a base address (4 KB page). The page may be a CPU virtual one,
 // as in Far Cry 4's front buffer headers (D3D's Swap converts it; fb1: 0xF4DBF = physical 0x14DC0): the physical heaps'
 // views at 0xA0000000 / 0xC0000000 / 0xE0000000 (the last 4 KB higher) map back to their physical page.
+bool IsLiveTextureLocked(const HostTexture *texture) {
+  for (const auto &[va, t] : g_textures)
+    if (t.get() == texture)
+      return true;
+  return false;
+}
+
 HostTexture *FindResolveTargetLocked(u32 base_page) {
   if (base_page >= 0xE0000)
     base_page = base_page - 0xE0000 + 1;

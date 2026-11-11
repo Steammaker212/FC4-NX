@@ -22,10 +22,13 @@ plume::RenderFormat ColorTargetFormat(GpuColorFormat format) {
   case GpuColorFormat::Fmt2_10_10_10_Float:
   case GpuColorFormat::Fmt16_16_16_16_Float:
     return plume::RenderFormat::R16G16B16A16_FLOAT;
+  // fc4-nx (2026-11-10): the Xenos 16_16 / 16_16_16_16 fixed-point targets hold -32..32 (s5.10; Xenia's
+  // snorm16_render_target_full_range), which SNORM's -1..1 clamped: Far Cry 4 writes heights / 32 into its 64x64
+  // 16_16 height tiles (up to 32), its bloom and SSAO 16_16_16_16 passes go above 1 too. Half floats hold the range.
   case GpuColorFormat::Fmt16_16:
-    return plume::RenderFormat::R16G16_SNORM;
+    return plume::RenderFormat::R16G16_FLOAT;
   case GpuColorFormat::Fmt16_16_16_16:
-    return plume::RenderFormat::R16G16B16A16_SNORM;
+    return plume::RenderFormat::R16G16B16A16_FLOAT;
   case GpuColorFormat::Fmt16_16_Float:
     return plume::RenderFormat::R16G16_FLOAT;
   case GpuColorFormat::Fmt32_Float:

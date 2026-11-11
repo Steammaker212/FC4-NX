@@ -453,6 +453,13 @@ void AdvanceStreamCacheFrameLocked();
 // fc4-nx (2026-11-10, banjo_renut_diag_show_texture "R<n>"): the destination header of the previous frame's n-th
 // resolve (0-based), or 0.
 u32 LastFrameResolveDestLocked(size_t index);
+// fc4-nx (2026-11-10, banjo_renut_diag_show_texture "L<slot>" / "C<slot>"): the base page bound at a fetch slot by the
+// last lighting draw (one that samples a 16_16 texture at 2^-16) / composite draw (one that samples format 54).
+u32 DiagRolePageLocked(bool composite, u32 slot);
+// The resolve destination that slot held at that draw (checked live with IsLiveTextureLocked), or null.
+HostTexture *DiagRoleTextureLocked(bool composite, u32 slot);
+// fc4-nx (2026-11-10, banjo_renut_diag_snapshot): the copy of a draw's texture (banjo_renut_diag_show_texture "SNAP").
+HostTexture *DiagSnapshotTextureLocked();
 
 // For the memory report: the converted vertex stream and index caches (the
 // pool's host memory and what the copies in it take).

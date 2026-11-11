@@ -8,6 +8,7 @@
 #include <bit>
 #include <atomic>
 #include <chrono>
+#include <thread>
 #include <condition_variable>
 #include <cstdlib>
 #include <mutex>
@@ -42,9 +43,16 @@ REXCVAR_DEFINE_BOOL(banjo_renut_capture_raw, false, "Banjo/Renut",
 
 // banjo-nx (2026-10-18, the deko3d depth of field): one of the game's textures on screen and in the captures in place of
 // the frame, to compare a pass's inputs between the back ends (the [trace] resolve lines name the headers).
+REXCVAR_DEFINE_INT32(banjo_renut_diag_frame_sleep_ms, 0, "Banjo/Diagnostics",
+                     "fc4-nx (2026-11-10, a test): the render thread sleeps this long at every present, a slow GPU on the "
+                     "PC (Far Cry 4 then lowers its own resolution as on the console)")
+    .range(0, 200);
 REXCVAR_DEFINE_STRING(banjo_renut_diag_show_texture, "", "Banjo/Renut",
                       "Diagnostic: show the host texture of this guest texture header (hex address, as the [trace] "
                       "resolve lines name them) instead of the frame, on screen and in captures");
+REXCVAR_DEFINE_INT32(banjo_renut_diag_show_texture_after_s, 0, "Banjo/Renut",
+                     "fc4-nx (2026-11-10), diagnostic: banjo_renut_diag_show_texture starts this many seconds into the run")
+    .range(0, 100000);
 REXCVAR_DEFINE_DOUBLE(banjo_renut_diag_show_gamma, 1.0, "Banjo/Renut",
                       "Diagnostic: banjo_renut_diag_show_texture's exponent (depth near 1 shows with 64 or so)");
 
@@ -386,8 +394,14 @@ bool DiagTextureImageLocked(PresentImage &out) {
     for (size_t at = 0; at < v.size();) {
       const size_t comma = std::min(v.find(',', at), v.size());
       const std::string item = v.substr(at, comma - at);
-      if (!item.empty() && (item[0] == 'R' || item[0] == 'r'))
+      if (item == "SNAP")  // fc4-nx: banjo_renut_diag_snapshot's copy
+        out.push_back(0x08000000u);
+      else if (!item.empty() && (item[0] == 'L' || item[0] == 'C'))  // fc4-nx: a slot of the lighting / composite draw
+        out.push_back((item[0] == 'C' ? 0x20000000u : 0x10000000u) | u32(std::strtoul(item.c_str() + 1, nullptr, 10)));
+      else if (!item.empty() && (item[0] == 'R' || item[0] == 'r'))
         out.push_back(0x80000000u | u32(std::strtoul(item.c_str() + 1, nullptr, 10)));
+      else if (!item.empty() && (item[0] == 'P' || item[0] == 'p'))  // fc4-nx: a resolve destination's physical page
+        out.push_back(0x40000000u | u32(std::strtoul(item.c_str() + 1, nullptr, 16)));
       else if (const u32 x = u32(std::strtoul(item.c_str(), nullptr, 16)))
         out.push_back(x);
       at = comma + 1;
@@ -397,15 +411,32 @@ bool DiagTextureImageLocked(PresentImage &out) {
   if (vas.empty())
     return false;
   static const auto start = std::chrono::steady_clock::now();
-  const auto s10 = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count() / 10;
+  const auto secs = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count() -
+                    REXCVAR_GET(banjo_renut_diag_show_texture_after_s);
+  if (secs < 0)
+    return false;
+  const auto s10 = secs / 10;
   const u32 entry = vas[size_t(s10) % vas.size()];
   const bool by_index = (entry & 0xFFFF0000u) == 0x80000000u;
-  const u32 va = by_index ? LastFrameResolveDestLocked((entry & 0xFFFFu) - 1) : entry;
-  HostTexture *t = va ? FindHostTextureAnyLocked(va) : nullptr;
+  const bool by_role = (entry & 0xCFFFFF00u) == 0 && (entry & 0x30000000u);
+  const bool by_page = (entry & 0xFFF00000u) == 0x40000000u || by_role;
+  const u32 va = by_index  ? LastFrameResolveDestLocked((entry & 0xFFFFu) - 1)
+                 : by_role ? DiagRolePageLocked((entry & 0x20000000u) != 0, entry & 0xFF)
+                 : by_page ? (entry & 0xFFFFFu)
+                           : entry;
+  HostTexture *t = entry == 0x08000000u ? DiagSnapshotTextureLocked()
+                   : by_role   ? DiagRoleTextureLocked((entry & 0x20000000u) != 0, entry & 0xFF)
+                   : by_page ? FindResolveTargetLocked(va)
+                   : va      ? FindHostTextureAnyLocked(va)
+                             : nullptr;
   static int64_t logged_slot = -1;
   if (s10 != logged_slot) {
     logged_slot = s10;
-    RGPU_INFO("[diag] show texture {} ({:08X}): {}", by_index ? fmt::format("R{}", entry & 0xFFFF) : "", va,
+    RGPU_INFO("[diag] show texture {} ({:08X}): {}",
+              by_index  ? fmt::format("R{}", entry & 0xFFFF)
+              : by_role ? fmt::format("{}{}", (entry & 0x20000000u) ? 'C' : 'L', entry & 0xFF)
+                        : "",
+              va,
               t ? fmt::format("{}x{} host format {}, exp bias {}", t->width, t->height, u32(t->host_format),
                               int(t->resolve_exp_bias))
                 : std::string("not found"));
@@ -424,6 +455,8 @@ bool DiagTextureImageLocked(PresentImage &out) {
 
 // Records the back-buffer pass and presents. Caller holds s.mutex.
 void PresentLocked(VideoState &s, const PresentImage *image) {
+  if (const int sleep_ms = REXCVAR_GET(banjo_renut_diag_frame_sleep_ms))
+    std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
   // Logs, once, why the GPU stopped if an earlier submission faulted.
   ReportDeviceLost(s.device.get());
   PresentImage diag_image;

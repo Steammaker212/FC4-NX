@@ -302,6 +302,7 @@ HostTexture *FindHostTextureAnyLocked(u32 texture_va);  // fc4-nx (2026-11-10, d
 void RequestTextureRelief();
 // fc4-nx: the last resolve destination into this base page (virtual pages of the physical heaps mapped back).
 HostTexture *FindResolveTargetLocked(u32 base_page);
+bool IsLiveTextureLocked(const HostTexture *texture);  // fc4-nx (2026-11-10, diagnostic)
 
 void ReleaseHostTextureLocked(u32 texture_va);
 

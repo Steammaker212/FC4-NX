@@ -1147,6 +1147,7 @@ namespace plume {
                             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                             srvDesc.Texture2D.MipLevels = interfaceTextureView->mipLevels;
                             srvDesc.Texture2D.MostDetailedMip = interfaceTextureView->mipSlice;
+                            srvDesc.Texture2D.PlaneSlice = interfaceTextureView->planeSlice;  // fc4-nx (2026-11-10)
                         }
                     }
 
@@ -2838,6 +2839,12 @@ namespace plume {
         this->texture = texture;
         this->desc = desc;
         this->format = toDXGITextureView(desc.format);
+        // fc4-nx (2026-11-10): an S8_UINT view of a depth-stencil texture reads its stencil plane (plane 1, in .y).
+        if (desc.format == RenderFormat::S8_UINT) {
+            this->format = texture->desc.format == RenderFormat::D24_UNORM_S8_UINT ? DXGI_FORMAT_X24_TYPELESS_G8_UINT
+                                                                                    : DXGI_FORMAT_X32_TYPELESS_G8X24_UINT;
+            this->planeSlice = 1;
+        }
         this->dimension = desc.dimension;
         this->mipLevels = std::min(desc.mipLevels, texture->desc.mipLevels - desc.mipSlice);
         this->mipSlice = desc.mipSlice;
@@ -3139,6 +3146,10 @@ namespace plume {
         psoDesc.DepthStencilState.DepthWriteMask = desc.depthWriteEnabled ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
         psoDesc.DepthStencilState.DepthFunc = toD3D12(desc.depthFunction);
         psoDesc.DepthStencilState.StencilEnable = desc.stencilEnabled;
+        // fc4-nx (2026-11-10): D3D12 has no stencil reference in the PSO; checkStencilRef sets this one with
+        // OMSetStencilRef. It was never filled: every stencil test compared against 0 (Far Cry 4's G-buffer, ref 0x48
+        // with NOTEQUAL: nothing drawn, the picture white).
+        stencilRef = desc.stencilReference;
         psoDesc.DepthStencilState.StencilReadMask = desc.stencilReadMask;
         psoDesc.DepthStencilState.StencilWriteMask = desc.stencilWriteMask;
         psoDesc.DepthStencilState.FrontFace.StencilFailOp = toD3D12(desc.stencilFrontFace.failOp);

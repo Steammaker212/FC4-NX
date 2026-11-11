@@ -602,3 +602,40 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   surface with an RB_COLOR_INFO exponent bias is logged (none of FC4's real targets has one).
 - banjo_renut_tile_replays: in a target grown for tiling, draws with a later tile's window offset are not drawn (FC4's
   passes all run with window offset 0: it does not trigger in FC4).
+
+## The white picture, found (2026-11-10, PC runs pcclear1 - pcc2d3)
+- **Stencil reference on D3D12:** plume's D3D12 pipelines never set their stencil reference (OMSetStencilRef(0)): every
+  stencil-tested G-buffer draw failed on PC. Fixed in plume_d3d12.cpp (`stencilRef = desc.stencilReference`).
+- **Reversed depth on D3D12:** FC4's 3D passes use VportZScale -1 / ZOffset 1. D3D12 refuses MinDepth > MaxDepth, so the
+  viewport is swapped and XenosRecomp's vertex epilogue flips z (`g_ScreenSpace & 2`: oPos.z = oPos.w - oPos.z).
+- **Right third (tiled G-buffer):** the draws run once at full width into targets grown to 1280 (banjo_renut_resolve_
+  extents), but the frame-start clear is the first tile's rect (0,0)-(864,704); on the console D3D replays it for every
+  tile. The second tile kept the last frame's lighting stencil and every G-buffer draw failed there.
+  banjo_renut_tiled_clears: such a clear of a grown target covers the whole target.
+- **16_16 fixed targets hold -32..32:** Renut's SNORM targets clamped to -1..1. FC4's height map: 64x64 16_16 tiles of
+  height / 32, resolved at 2^11 into k_16_16 textures **fetched as integers** (num_format 1, dword 3 bit 0) at 2^-16 and
+  scaled by 1024 / 256 in the shaders. Fmt16_16 / Fmt16_16_16_16 targets are half float now (format.cpp), and
+  banjo_renut_resolve_integer_fetch keeps value x 2^bias unclamped for such a destination (resolve_copy_ps param1 < 0).
+  Xenia saturates these (its "black terrain patches / blocky tiles" in FC4).
+- **The depth restore (the white):** before the lighting FC4 draws its depth texture's words through an 8_8_8_8 view
+  into a colour target at EDRAM base 0x540 (ps_1999728a06a0c2bb: oC0 = tex.zyxw), then binds a D24FS8 target at 0x540
+  for the light volumes (stencil EQUAL 1 / 2, NOT_EQUAL 0), the sky and the particles. Renut keeps one host target per
+  view, so that depth target held stale data: the lighting drew nothing (black), the auto-exposure (c48.z, 24 -> 112)
+  climbed to its maximum on a dark scene and the sky covered the screen. banjo_renut_color_to_depth
+  (render/edram_transfer.cpp, color_to_depth_ps): a depth target bound after the 8_8_8_8 target over its EDRAM was written
+  takes that target's words: depth in one pass (SV_Depth, 20e4 or unorm24), stencil in eight (one bit each through its
+  write mask, no stencil export). Surfaces carry write_seq (NextSurfaceWriteSeq) to order the two.
+- **Stencil in the depth words on PC:** the words' stencil byte (depth_resolve.hlsli) read 0 on D3D12 (no stencil view).
+  plume_d3d12: an S8_UINT view of a depth-stencil texture is X32_TYPELESS_G8X24_UINT / X24_TYPELESS_G8_UINT, plane 1;
+  the shader reads .y there and .x on Vulkan / deko3d. Gameplay stencil bytes now: 0x84, 0x08, 0x00, a few 0x01 / 0x02.
+- **CPU readback:** FC4's CPU reads only its 80x44 16_16_FLOAT luminance grid (sub_838B6B48, vupkd3d128 FLOAT16_4).
+  Its headers hold 0xE0000000-view addresses (0xF2BD9000 -> physical 0x12BDA000, one page up), and the guest reads it as
+  soon as its fence passes, which Renut signals before the host GPU runs the work. banjo_renut_resolve_readback_texels
+  (4096) / _formats ("31"): the last finished readback of each kind goes into each new destination at its resolve
+  (a few frames old); old destinations are never written late (their pages are reused).
+- Diagnostics added: banjo_renut_diag_skip_ps (draws by pixel shader hash not drawn), banjo_renut_diag_cpu_reads
+  (Windows: page guards on the guest views of resolve destinations; first access logged with renut.exe+offset for
+  llvm-symbolizer), banjo_renut_diag_show_texture "L<slot>" / "C<slot>" (a slot of the lighting / composite draw) and
+  _after_s, banjo_renut_diag_readback_stats, banjo_renut_diag_color_to_depth (stencil byte histogram); the trace logs
+  each draw's shader hashes (out/fc4_shaders/census_exp/hlsl/ps_<hash>.hlsl), the pixel shaders per target run, the
+  composite / lighting pixel constants and window offset changes.

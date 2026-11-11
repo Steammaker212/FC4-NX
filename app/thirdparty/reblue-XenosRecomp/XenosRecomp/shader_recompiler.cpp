@@ -3232,10 +3232,13 @@ void ShaderRecompiler::recompile(const uint8_t* shaderData, const std::string_vi
                         // passes through, unless the viewport transform is off: then it is in
                         // pixels (after what is left of the transform), mapped here to clip
                         // space over the whole render target, y down.
-                        out += "\tif (g_ScreenSpace != 0)\n\t{\n";
+                        out += "\tif ((g_ScreenSpace & 1u) != 0)\n\t{\n";
                         out += "\t\tfloat2 pixel = oPos.xy * g_ScreenScale + g_ScreenOffset * oPos.w;\n";
                         out += "\t\toPos.xy = pixel * float2(2.0, -2.0) / g_ViewportSize + float2(-1.0, 1.0) * oPos.w;\n";
                         out += "\t}\n";
+                        // fc4-nx (2026-11-10): bit 1, a reversed viewport depth range on D3D12 (which does not
+                        // take MinDepth > MaxDepth): the host range is swapped and z flipped here.
+                        out += "\tif ((g_ScreenSpace & 2u) != 0) oPos.z = oPos.w - oPos.z;\n";
                         // For point_sprite_gs: the exported point size (0 when the shader exports
                         // none: the render state's), negative for a killed vertex.
                         out += "\toPointSize = oPts.z != 0.0 ? -1.0 : oPts.x;\n";

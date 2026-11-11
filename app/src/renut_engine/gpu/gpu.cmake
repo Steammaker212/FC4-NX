@@ -271,6 +271,8 @@ function(renut_gpu_setup TARGET)
         ${RENUT_GPU_DIR}/overlay/overlay_ui.cpp
         # Draws, targets, textures, shaders and formats.
         ${RENUT_GPU_DIR}/render/draw.cpp
+        ${RENUT_GPU_DIR}/render/cpu_read_watch.cpp # fc4-nx (2026-11-10, diagnostic)
+        ${RENUT_GPU_DIR}/render/edram_transfer.cpp # fc4-nx (2026-11-10, banjo_renut_color_to_depth)
         ${RENUT_GPU_DIR}/render/format.cpp
         ${RENUT_GPU_DIR}/render/graphics_options.cpp
         ${RENUT_GPU_DIR}/render/pipeline.cpp
@@ -302,6 +304,7 @@ function(renut_gpu_setup TARGET)
     renut_host_shader(${TARGET} ui_upscale_ps ps_6_0)
     renut_host_shader(${TARGET} ui_upscale_bicubic_ps ps_6_0)
     renut_host_shader(${TARGET} ui_depth_upscale_ps ps_6_0)
+    renut_host_shader(${TARGET} color_to_depth_ps ps_6_0)  # fc4-nx (2026-11-10, banjo_renut_color_to_depth)
     renut_host_shader(${TARGET} rectangle_list_gs gs_6_0)
     renut_host_shader(${TARGET} point_sprite_gs gs_6_0)
     renut_host_shader(${TARGET} stream_convert_cs cs_6_0)

@@ -312,6 +312,7 @@ namespace plume {
 
     struct D3D12TextureView : RenderTextureView {
         DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+        UINT planeSlice = 0;  // fc4-nx (2026-11-10): 1 for the stencil plane of a depth-stencil texture (S8_UINT views)
         const D3D12Texture *texture = nullptr;
         RenderTextureViewDesc desc;
         RenderTextureViewDimension dimension = RenderTextureViewDimension::UNKNOWN;
