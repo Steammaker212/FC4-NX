@@ -8,6 +8,10 @@
 //   translate    its host size
 //   param0       1 for D24FS8 (20e4 float depth), 0 for D24S8 (24-bit unorm)
 //   param1       < 0: the depth pass; 0..7: the pass for that stencil bit (pixels without it are discarded)
+//   scale.x      fc4-nx (2026-11-12, banjo_renut_color_to_depth_swap): 40 guest pixels in host pixels, 0 = off. In
+//                the EDRAM a depth tile (80x16 samples) holds its two 40-sample halves the other way round from a colour
+//                tile, so the depth at x is the colour word written at x + 40 or x - 40 of the same tile (the console's
+//                restores write the words so swapped).
 #define UTILITY_OWN_TEXTURE_TABLE
 #include "utility.hlsli"
 
@@ -27,7 +31,14 @@ float DecodeFloat20e4(uint bits)
 float main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Depth
 {
     const int2 size = int2(g_Push.translate);
-    const int2 texel = min(int2(uv * g_Push.translate), size - 1);
+    int2 texel = min(int2(uv * g_Push.translate), size - 1);
+    if (g_Push.scale.x > 0.0)
+    {
+        const float half_tile = floor(g_Push.scale.x + 0.5);  // float: uam has no integer division by a variable
+        const bool first_half = frac((float(texel.x) + 0.5) / (2.0 * half_tile)) < 0.5;
+        texel.x += int(first_half ? half_tile : -half_tile);
+        texel.x = clamp(texel.x, 0, size.x - 1);
+    }
     const float4 color = g_Color[NonUniformResourceIndex(g_Push.textureIndex)].Load(int3(texel, 0));
     const uint4 bytes = uint4(saturate(color) * 255.0 + 0.5);
     const uint word = bytes.x | (bytes.y << 8) | (bytes.z << 16) | (bytes.w << 24);

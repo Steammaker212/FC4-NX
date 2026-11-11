@@ -9271,6 +9271,10 @@ int FastDrawLocked(const u8 *device_state, const DrawCall &call, const ReplayCon
     if (((dc & 2) && (dc & 4)) || ((dc & 1) && ((f.kp_hot.stencil_ref_mask >> 16) & 0xFF) != 0)) {
       ++targets.depth->writes;
       targets.depth->write_seq = NextSurfaceWriteSeq();
+#if defined(PLUME_DEKO3D)
+      if ((dc & 2) && (dc & 4) && ps_entry && (ps_entry->shaderFlags & kShaderFlagPixelDepth))
+        plume::Deko3DInvalidateZcull(s.command_list);  // fc4-nx (2026-11-12): a shader-written depth, unseen by Zcull
+#endif
     }
     if (dc & 1)
       targets.depth->stencil_used = true;
@@ -10029,6 +10033,7 @@ bool DrawStateLocked(const u8 *device_state, const DrawCall &call, const ReplayC
   auto *vs = FindShaderLocked(vs_va, RecordKind::VertexShader);
   const u32 declaration_va = device.U32(d3d::kDeviceOffsetVertexDeclaration);
   auto *ps = FindShaderLocked(device.U32(d3d::kDeviceOffsetPixelShader), RecordKind::PixelShader);
+  const bool ps_writes_depth = ps && ps->entry && (ps->entry->shaderFlags & kShaderFlagPixelDepth);  // fc4-nx (2026-11-12)
   // Without a declaration set, the shader fetches as D3DVertexShader_Bind
   // bound it, or else as its own vfetches describe (bundle meshes).
   const VertexDeclarationRecord *declaration = nullptr;
@@ -11154,6 +11159,10 @@ bool DrawStateLocked(const u8 *device_state, const DrawCall &call, const ReplayC
     if (depth_writes || stencil_writes) {
       ++targets.depth->writes;
       targets.depth->write_seq = NextSurfaceWriteSeq();
+#if defined(PLUME_DEKO3D)
+      if (depth_writes && ps_writes_depth)
+        plume::Deko3DInvalidateZcull(s.command_list);  // fc4-nx (2026-11-12): a shader-written depth, unseen by Zcull
+#endif
     }
     if (dc & 1)
       targets.depth->stencil_used = true;  // banjo-nx (2026-10-19, banjo_deko3d_depth_handover)

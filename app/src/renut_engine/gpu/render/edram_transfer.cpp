@@ -32,11 +32,19 @@
 #include "host_shaders/color_to_depth_ps.deko3d.h"
 #include "host_shaders/smaa_vs.deko3d.h"
 #endif
+#if defined(PLUME_DEKO3D)
+#include <plume_deko3d.h>  // fc4-nx (2026-11-12): Deko3DInvalidateZcull
+#endif
 #if defined(_WIN32)
 #include "host_shaders/color_to_depth_ps.dxil.h"
 #include "host_shaders/smaa_vs.dxil.h"
 #endif
 
+REXCVAR_DEFINE_BOOL(banjo_renut_color_to_depth_swap, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-12): banjo_renut_color_to_depth reads each depth pixel's word from the other "
+                    "40-sample half of its 80x16 EDRAM tile, as the console's depth view of colour words does (depth "
+                    "tiles hold their halves swapped). Without it Far Cry 4's restored depth was off in 40x16 blocks at "
+                    "every depth edge: strips and staircases in the sky, boxed leaves, smoke over near objects");
 REXCVAR_DEFINE_BOOL(banjo_renut_color_to_depth, true, "Banjo/Renut",
                     "fc4-nx (2026-11-10): a depth target bound after the 8_8_8_8 colour target over its EDRAM was "
                     "written takes that target's words as its depth and stencil (Far Cry 4's depth restore before the "
@@ -224,6 +232,10 @@ bool ColorToDepthBeforeBindLocked(HostSurface *depth) {
   // D3DFMT_D24FS8 (GPU texture format 24_8_FLOAT) stores 20e4 float depth.
   push.param0 = (depth->format_word & 0x3F) == 23 ? 1.0f : 0.0f;
   push.param1 = -1.0f;
+  // fc4-nx (2026-11-12, banjo_renut_color_to_depth_swap): 32-bit single-sampled views: 80-sample tiles.
+  static const bool swap = REXCVAR_GET(banjo_renut_color_to_depth_swap);
+  if (swap && depth->samples == plume::RenderSampleCount::COUNT_1 && color->samples == plume::RenderSampleCount::COUNT_1)
+    push.scale[0] = 40.0f * float(depth->scale.Size(depth->width)) / float(std::max(depth->width, 1u));
   cmd->setGraphicsPipelineLayout(s.utility_layout.get());
   cmd->setGraphicsDescriptorSet(s.texture_set.get(), 0);
   cmd->setGraphicsDescriptorSet(s.sampler_set.get(), 1);
@@ -246,6 +258,9 @@ bool ColorToDepthBeforeBindLocked(HostSurface *depth) {
     }
     depth->stencil_used = true;
   }
+#if defined(PLUME_DEKO3D)
+  plume::Deko3DInvalidateZcull(cmd);  // fc4-nx (2026-11-12): the depth written by the shader, unseen by Zcull
+#endif
   ++depth->writes;
   depth->write_seq = NextSurfaceWriteSeq();
   depth->transfer_seq = color->write_seq;

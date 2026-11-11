@@ -885,3 +885,33 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
 - Switch hw18 NRO (D:\switch\fc4-nx\fc4-nx.nro, hw17 kept as fc4-nx.hw17.nro.bak; ELF out/switch_runs/renut_hw18.elf):
   banjo_renut_resolve_7e3_bits, banjo_renut_surface_registers, the growth limit; in-run A/B off
   (banjo_renut_ab_targets ""), the noise counter on. hw17's 13 clips are in out/switch_runs/hw17/album (deleted from SD).
+
+## Console run hw18 (2026-11-11) and hw19: depth tiles, Zcull, 540p
+- hw18 (out/switch_runs/hw18: 12 clips, 9 screenshots, logs, rex_profile.log): noise 2 of ~7,000 frames. Gameplay
+  12-17 fps, GPU 60-80 ms a frame (light scenes 30 fps at 22-26 ms), render thread 20-55 ms at 600-1,100 draws a frame.
+  The user's list: smoke through objects, shadows blocky at first when turning, lines in the sky at the wake-up,
+  boxed leaves, a blocky wound decal, black blocks in the sky (melee and turning), the phone's screen slightly off.
+- **Depth tile halves (PC and console):** the wake-up shot reproduces on PC (banjo_renut_diag_frame_sleep_ms 50,
+  pcsky1 59 s): the sky behind the trees in vertical strips 40 guest pixels wide, staircases at the rock's edge. In
+  the EDRAM a depth tile (80x16 samples) holds its 40-sample halves the other way round from a colour tile; FC4's
+  depth restores (pass-through quads of words through an 8_8_8_8 view, then the depth bound at that base) write the
+  words pre-swapped for the console's depth view, and Renut's colour-to-depth transfer copied them pixel for pixel:
+  the restored depth (full and half resolution) was off by half a tile wherever the depth changes, which the sky,
+  the light volumes and GI, the particles (GEQUAL on the half-res depth) and decals all test. New
+  banjo_renut_color_to_depth_swap (true): the transfer reads each pixel's word from the other half of its tile
+  (40 guest pixels in host pixels; single-sampled 32-bit views). pcsky2 / pcsky3: the sky clean; pcswap1 normal.
+- Zcull off on the Switch (banjo_deko3d_zcull false): tile-sized wrong culling is a known deko3d hazard here (shader-
+  written depth, reversed Z on the half-res depth, one depth image under several framebuffers). plume's
+  Deko3DInvalidateZcull now drops it after Renut's colour-to-depth draw and after game draws whose pixel shader writes
+  depth (only with Zcull on).
+- Frame rate: the 3D image at 960x540 handheld / 1152x648 docked with the HUD at 720p (banjo_renut_render_height_*,
+  the composite ps_97f6587d89ad217a as banjo_renut_smaa_after_ps, SMAA off); PC run pcscale1 (renut_resolution 480p,
+  2/3 scale): FC4's passes right, no noise. msaa_level 2 (the half-res 4x target). The SD's katamari.toml: those two,
+  switch_profile_stacks and banjo_deko3d_bind_trace off (the 1 kHz stack sampling cost CPU); its old copy in
+  out/switch_runs/hw18/katamari.sd-before-hw19.toml. Noise probe and readback stats off. renut_gpu_profile 30: the
+  next log has "GPU profile:" by pass.
+- hw18's render thread (rex_profile.log, gameplay): memmove 15 %, ConvertVertices 9 %, FastDrawLocked 7 %,
+  DropReplacedRanges 5 %, PmullHash 4 %, free 4 %, PushFloatConstants 3 %, the noise probe 2 %. PC GPU profile
+  (pcprof1, 5.9 ms a frame): shadow cascades 15 % (305 depth draws into three 768x768 views), resolves 9 %, the
+  G-buffer's terrain / foliage 8 %.
+- Switch hw19 NRO (hw18 kept as fc4-nx.hw18.nro.bak; ELF out/switch_runs/renut_hw19.elf). hw18's album deleted from SD.

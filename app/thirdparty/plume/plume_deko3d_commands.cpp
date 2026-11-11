@@ -389,6 +389,18 @@ namespace plume {
     void Deko3DSetMergeBarriers(bool on) { g_deko3dOptions.mergeBarriers = on; }
     void Deko3DSetDiscardClears(bool on) { g_deko3dOptions.discardClears = on; }
 
+    // fc4-nx (2026-11-12): Zcull describes the bound depth target as its clears and rasterised depth left it; a draw
+    // whose pixel shader writes the depth (SV_Depth) is not seen by it. Far Cry 4's half-resolution depth (cleared to
+    // 0, reversed Z) is filled so (Renut's colour-to-depth transfer), and its particles' GEQUAL test then passed in
+    // whole tiles Zcull still took for 0: smoke over everything in front of it. Dropped after such draws.
+    void Deko3DInvalidateZcull(RenderCommandList *commandList) {
+        if (!commandList || !Deko3DGetOptions().zcull)
+            return;
+        auto *cl = static_cast<Deko3DCommandList *>(commandList);
+        cl->flushBarriers();
+        dkCmdBufBarrier(cl->cmd, DkBarrier_None, DkInvalidateFlags_Zcull);
+    }
+
     void Deko3DSharedLinesWritten(RenderCommandList *commandList, uint32_t lines) {
         if (commandList)
             static_cast<Deko3DCommandList *>(commandList)->texLinesWritten |= lines;

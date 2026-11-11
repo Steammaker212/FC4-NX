@@ -763,6 +763,7 @@ namespace plume {
     void Deko3DSetLeanBarriers(bool on);   // fc4-nx (2026-11-11): in-run A/B targets 71, 72, 74
     void Deko3DSetMergeBarriers(bool on);
     void Deko3DSetDiscardClears(bool on);
+    void Deko3DInvalidateZcull(RenderCommandList *commandList);  // fc4-nx (2026-11-12): after a shader-written depth
     void Deko3DSharedLinesWritten(RenderCommandList *commandList, uint32_t lines);
     // katamari-nx (2026-10-30): fragment-stage textures bound by descriptor slot (sampler 0), bindings first.., for a
     // host pipeline whose shader declares them bound (tools/deko3d_glsl.py: host shaders' multisampled textures,
