@@ -165,7 +165,7 @@ banjo_deko3d_uam_uniform_branches = true
 banjo_deko3d_early_hoist = true
 banjo_renut_resolve_skip = true
 banjo_renut_depth_words_lazy = true
-banjo_deko3d_barrier_merge = true
+banjo_deko3d_barrier_merge = false  # hw17: merged barriers made most of the noise frames (hw16 A/B)
 banjo_deko3d_barrier_lean = true
 # fc4-nx (2026-11-10, hw10 dinner garbage): off. FC4 restores depth and stencil from colour words over the same EDRAM
 # (banjo_renut_color_to_depth), which rewrites the image a handed-over resolve samples; one depth copy a frame more.
@@ -254,5 +254,8 @@ banjo_xma_frame_cache = false
 # 73 drawn resolves, 74 discard clears, 14 the record worker, 18 eager kicks, 39 texture-bind skip. Each is off for
 # 5 s in turn; "[noise]" every 10 s gives each one's off-half noise against all-on.
 banjo_renut_diag_noise_probe = true
-banjo_renut_ab_targets = "71,72,73,74,14,18,39"
+# hw16's result (fc4.log 09:0x-09:20, "[noise]"): all on 415 / 2921 frames noisy (14 %); 72 (barrier merge) off 14 / 524
+# (3 %); 14 off 19 %, 18 off 14 %, 39 off 20 %, 71 off 12 %, 73 off 11 %, 74 off 12 %. hw17: merge off (above); the A/B
+# goes on over the rest.
+banjo_renut_ab_targets = "71,73,74,14,39"
 banjo_renut_ab_s = 5

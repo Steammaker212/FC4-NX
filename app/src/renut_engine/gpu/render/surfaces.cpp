@@ -44,6 +44,10 @@ REXCVAR_DEFINE_BOOL(banjo_renut_resolve_extents, true, "Banjo/Renut",
 REXCVAR_DEFINE_BOOL(banjo_renut_grow_tested_depth, true, "Banjo/Renut",
                     "fc4-nx (2026-11-11): a depth target that a draw tests, bound with larger colour targets, grows to "
                     "their size (Maxwell renders no further than the smallest attachment)");
+REXCVAR_DEFINE_BOOL(banjo_renut_view_float16_8888, false, "Banjo/Renut",
+                    "fc4-nx (2026-11-11): banjo_renut_view_float16 also takes 8_8_8_8 views that "
+                    "renut_post_process_precision High made 64-bit (false: they stay 16-bit unorm, clamped as the "
+                    "console's 8-bit)");
 REXCVAR_DEFINE_BOOL(banjo_renut_view_float16, true, "Banjo/Renut",
                     "fc4-nx (2026-11-10): once an EDRAM colour view has been bound as 16_16_16_16_FLOAT, every surface "
                     "over it in a 16_16_16_16 format takes the float target (the console's EDRAM is one memory; Far "
@@ -803,9 +807,21 @@ HostSurface *ColorOverDepthLocked(const HostSurface *depth) {
   if (!depth || !depth->depth || !depth->key)
     return nullptr;
   // TargetKey: EDRAM base 0-11, pitch 12-25, samples 26-27, depth 28, scale 29-31, host format above.
-  const uint64_t want = (depth->key & 0xEFFFFFFFull) | uint64_t(u32(plume::RenderFormat::R8G8B8A8_UNORM)) << 32;
-  auto it = g_targets.find(want);
-  return it != g_targets.end() && it->second && !it->second->depth ? it->second.get() : nullptr;
+  // fc4-nx (2026-11-11, near objects black): an 8_8_8_8 view's host target is RGBA8, or 64-bit with
+  // renut_post_process_precision High for one of half the screen or less (R16G16B16A16_UNORM, or _FLOAT once that
+  // view has been float: banjo_renut_view_float16). FC4 restores its 640x352 half-resolution depth through such a
+  // target; looking for RGBA8 only, it was never taken, the light volumes tested a stale depth and the light buffer
+  // stayed black: near objects (the machete, foliage, the phone) unlit on PC and, since hw14, on the console.
+  // The latest written of them.
+  HostSurface *best = nullptr;
+  for (const plume::RenderFormat f : {plume::RenderFormat::R8G8B8A8_UNORM, plume::RenderFormat::R16G16B16A16_UNORM,
+                                      plume::RenderFormat::R16G16B16A16_FLOAT}) {
+    auto it = g_targets.find((depth->key & 0xEFFFFFFFull) | uint64_t(u32(f)) << 32);
+    if (it != g_targets.end() && it->second && !it->second->depth && it->second->texture &&
+        (!best || it->second->write_seq > best->write_seq))
+      best = it->second.get();
+  }
+  return best;
 }
 
 uint64_t NextSurfaceWriteSeq() {
@@ -1005,7 +1021,14 @@ HostSurface *GetHostSurfaceSlow(u32 surface_va, const d3d::SurfaceDesc *desc) {
     if (seen & 2)
       format = DepthTargetFormat();
   }
-  if (!depth && REXCVAR_GET(banjo_renut_view_float16) &&
+  // fc4-nx (2026-11-11): not an 8_8_8_8 view made 64-bit by renut_post_process_precision High (banjo_renut_view_float16
+  // _8888): on the console it is 8-bit unorm, clamped at 1; joined to a float target its blends (FC4's half-resolution
+  // light buffer) no longer clamp.
+  static const bool join_8888 = REXCVAR_GET(banjo_renut_view_float16_8888);
+  const bool from_8888 =
+      GpuColorFormat((u32(desc->ColorInfo) >> 16) & 0xF) == GpuColorFormat::Fmt8_8_8_8 ||
+      GpuColorFormat((u32(desc->ColorInfo) >> 16) & 0xF) == GpuColorFormat::Fmt8_8_8_8_Gamma;
+  if (!depth && REXCVAR_GET(banjo_renut_view_float16) && (join_8888 || !from_8888) &&
       (format == plume::RenderFormat::R16G16B16A16_FLOAT || format == plume::RenderFormat::R16G16B16A16_UNORM ||
        format == plume::RenderFormat::R16G16B16A16_SNORM)) {
     // fc4-nx (2026-11-10): one view, one 64-bit format once it has been float (g_float16_views).

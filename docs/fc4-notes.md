@@ -812,3 +812,22 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   missing image invalidation before writes and Renut's read-to-read transitions), 72 banjo_deko3d_barrier_merge, 73
   banjo_deko3d_draw_resolves, 74 banjo_deko3d_discard_clears. The A/B left a plume flag target (39, 68) off when its
   list moved on: AbApply now sets all of them as configured first. PC: 0.1 % (a few hits on fire), the console ~15 %.
+
+## Console run hw16 (2026-11-11): the noise is the merged barriers; near objects black found
+- "[noise]" at the run's end (fc4.log 09:0x-09:20): all on 415 / 2921 frames noisy (14 %); with 72
+  (banjo_deko3d_barrier_merge) off 14 / 524 (3 %); 14 off 19 %, 18 off 14 %, 39 off 20 %, 71 off 12 %, 73 off 11 %,
+  74 off 12 %. hw17: banjo_deko3d_barrier_merge false on the Switch. (Why merging breaks it is not pinned down: plume
+  emits a held barrier at the next draw after that draw's buffer and texture binds and pushed constants, where unmerged
+  barriers came before them; every work command flushes.)
+- **Near objects black (the machete, foliage, the phone; PC too, its old "near objects unlit"):** FC4 restores its
+  640x352 half-resolution depth through an 8_8_8_8 colour target at the depth's EDRAM (the words, then the depth target
+  bound there). With renut_post_process_precision High an 8_8_8_8 target of half the screen is 64-bit, and
+  ColorOverDepthLocked looked for RGBA8 only: no transfer, the light volumes tested a stale depth, the half-res light
+  buffer (resolves of B2E7AF50 into 8_8_8_8) stayed 0. Now it takes the latest of the RGBA8 / R16G16B16A16 UNORM /
+  FLOAT targets there (the shader's round(v * 255) gives the same bytes). PC run pcnear1: the phone scene and the near
+  foliage lit; the light buffer probe 0 -> 0.56. hw11 / hw12 (precision Game) had it lit for this reason.
+- New: banjo_renut_view_float16_8888 (false): an 8_8_8_8 view made 64-bit by High stays 16-bit unorm (clamped as the
+  console's 8-bit) instead of joining a float target.
+- Still open: near objects are now lit but too bright (white grass, cyan-white rock on PC, as the console's hw12). The
+  exposure is not the cause: c48.x stays 3.341 in gameplay with near objects black (pcfinal1) and lit (pcnear3); the
+  near lighting itself runs hot (suspects: the sun's shadow term from the 2304x768 atlas, the light buffer's scale).
