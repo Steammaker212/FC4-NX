@@ -114,6 +114,12 @@ REXCVAR_DEFINE_BOOL(banjo_renut_tile_replays, true, "Banjo/Renut",
                     "fc4-nx (2026-11-10): in a target grown for a tiled pass (banjo_renut_resolve_extents), draws "
                     "with a later tile's window offset are not drawn (the pass without an offset covers the screen); "
                     "false: drawn shifted by the offset, as before");
+REXCVAR_DEFINE_BOOL(banjo_renut_resolve_7e3_bits, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-11): a colour target last written through a 2_10_10_10_FLOAT (7e3) view and "
+                    "resolved through a fixed 2_10_10_10 view into a 2_10_10_10 texture gets the console's bits: each "
+                    "channel's 7e3 code as 10-bit unorm. Far Cry 4 resolves its HDR picture so and its composite "
+                    "(ps_97f6587d89ad217a) decodes the 7e3 from the texture (floor / frac / exp2); the values copied "
+                    "as they are came out exponentially too bright (the white, washed-out picture)");
 REXCVAR_DEFINE_BOOL(banjo_renut_resolve_fixed_clamp, true, "Banjo/Renut",
                     "fc4-nx (2026-11-10): a colour resolve into a fixed-point texture format (8_8_8_8, 2_10_10_10, 16, "
                     "16_16, 16_16_16_16 ...) from a float or signed target, or with an exponent bias, is drawn with the "
@@ -1685,17 +1691,33 @@ plume::RenderRect ScaleRect(const plume::RenderRect &rect, RenderScale scale) {
                            scale.Coord(rect.bottom));
 }
 
+// fc4-nx (2026-11-11, banjo_renut_surface_registers): the surface in a device slot (0-3 colour, 4 depth), placed with
+// the device's register copies when its header contradicts them.
+HostSurface *DeviceSurfaceLocked(const GuestDevice &device, u32 slot) {
+  const u32 va = slot == 4 ? device.U32(d3d::kDeviceOffsetDepthStencil)
+                           : device.U32(d3d::kDeviceOffsetRenderTargets + slot * 4);
+  if (!va)
+    return nullptr;
+  const d3d::DestinationPacket &dp = device.dev().m_DestinationPacket;
+  const u32 target_info = slot == 4 ? u32(dp.DepthInfo)
+                          : slot == 0 ? u32(dp.Color0Info)
+                          : slot == 1 ? u32(dp.Color1Info)
+                          : slot == 2 ? u32(dp.Color2Info)
+                                      : u32(dp.Color3Info);
+  return GetHostSurfaceRegsLocked(va, u32(dp.SurfaceInfo), target_info, slot == 4, slot == 0);
+}
+
 bool GatherTargets(const GuestDevice &device, Targets &t) {
   for (u32 i = 0; i < d3d::kMaxRenderTargets; ++i) {
     const u32 va = device.U32(d3d::kDeviceOffsetRenderTargets + i * 4);
     if (!va)
       break;
-    HostSurface *surface = GetHostSurfaceLocked(va);
+    HostSurface *surface = DeviceSurfaceLocked(device, i);  // fc4-nx (2026-11-11)
     if (!surface || surface->depth)
       break;
     t.colors[t.color_count++] = surface;
   }
-  HostSurface *depth = GetHostSurfaceLocked(device.U32(d3d::kDeviceOffsetDepthStencil));
+  HostSurface *depth = DeviceSurfaceLocked(device, 4);  // fc4-nx (2026-11-11)
   if (depth && depth->depth)
     t.depth = depth;
   if (!t.color_count && !t.depth)
@@ -7694,7 +7716,7 @@ void SurfaceDescWords(u32 va, u32 out[3]) {
   out[0] = out[1] = out[2] = 0;
   if (!va)
     return;
-  if (const auto *desc = GuestPtr<const d3d::SurfaceDesc>(va + sizeof(d3d::Resource))) {
+  if (const auto *desc = static_cast<const d3d::SurfaceDesc *>(SurfaceHeaderLocked(va))) {  // fc4-nx (2026-11-11)
     out[0] = desc->Size;
     out[1] = desc->SurfaceInfo;
     out[2] = desc->Format;
@@ -9242,6 +9264,7 @@ int FastDrawLocked(const u8 *device_state, const DrawCall &call, const ReplayCon
     if ((f.kp_hot.color_mask >> (4 * i)) & 0xF) {
       ++targets.colors[i]->writes;
       targets.colors[i]->write_seq = NextSurfaceWriteSeq();  // fc4-nx (2026-11-10, banjo_renut_color_to_depth)
+      targets.colors[i]->written_format = targets.colors[i]->format_word & 0x3F;  // fc4-nx (2026-11-11, banjo_renut_resolve_7e3_bits)
     }
   if (targets.depth) {
     const u32 dc = f.kp_hot.depth_control;
@@ -11122,6 +11145,7 @@ bool DrawStateLocked(const u8 *device_state, const DrawCall &call, const ReplayC
     if ((key.color_mask >> (4 * i)) & 0xF) {
       ++targets.colors[i]->writes;
       targets.colors[i]->write_seq = NextSurfaceWriteSeq();  // fc4-nx (2026-11-10, banjo_renut_color_to_depth)
+      targets.colors[i]->written_format = targets.colors[i]->format_word & 0x3F;  // fc4-nx (2026-11-11, banjo_renut_resolve_7e3_bits)
     }
   if (targets.depth) {
     const u32 dc = key.depth_control;
@@ -11815,6 +11839,7 @@ void ClearTargets(const Targets &t, u32 flags, const plume::RenderRect &rect, co
                         c->clear_writes == c->writes && std::memcmp(c->clear_color, color, sizeof(c->clear_color)) == 0;
     ++c->writes;  // banjo-nx (banjo_renut_resolve_skip)
     c->write_seq = NextSurfaceWriteSeq();  // fc4-nx (2026-11-10, banjo_renut_color_to_depth)
+    c->written_format = c->format_word & 0x3F;  // fc4-nx (2026-11-11, banjo_renut_resolve_7e3_bits)
     g_clears_whole += is_whole;
     if (repeat)
       ++g_clear_repeats;
@@ -12136,7 +12161,7 @@ bool IsUnormColorFormat(plume::RenderFormat format) {
 }
 
 bool DrawResolveCopy(HostSurface *surface, HostTexture *dest, const plume::RenderRect &rect, uint32_t host_x,
-                     uint32_t host_y, float clamp_scale = 0.0f) {
+                     uint32_t host_y, float clamp_scale = 0.0f, bool bits_7e3 = false) {
   auto &s = State();
   if (!s.resolve_copy_ps || !dest->texture || !dest->render_target || dest->host_format != surface->format ||
       dest->dimension != TextureDimension::Tex2D || dest->stacked)
@@ -12207,6 +12232,7 @@ bool DrawResolveCopy(HostSurface *surface, HostTexture *dest, const plume::Rende
   push.translate[1] = float(rect.top - int32_t(host_y));
   push.texture_index = source_slot;
   push.sampler_index = kPointClampSamplerSlot;
+  push.param0 = bits_7e3 ? 7.0f : 0.0f;  // fc4-nx (2026-11-11, banjo_renut_resolve_7e3_bits)
   push.param1 = clamp_scale;  // fc4-nx (2026-11-10): > 0, the bias and the 0..1 clamp (resolve_copy_ps)
   cmd->setGraphicsPushConstants(0, &push, 0, sizeof(push));
   cmd->drawInstanced(3, 1, 0, 0);
@@ -12800,6 +12826,9 @@ void NoiseProbeReportLocked() {
     }
     p.buffer->unmap();
     const bool noisy = total && hits * 20 > total;  // over 5 %
+    static uint32_t noisy_logged = 0;  // fc4-nx (2026-11-11): which frames, to match with the trace's
+    if (noisy && noisy_logged++ < 400)
+      RGPU_INFO("[noise] frame {} noisy ({} of {} pairs)", p.frame, hits, total);
     NoiseCount &c = g_noise_by_ab[p.ab_off];
     ++c.frames;
     c.noisy += noisy;
@@ -13060,7 +13089,20 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
   const u32 source = flags & 7;
   const u32 source_va = source == 4 ? device.U32(d3d::kDeviceOffsetDepthStencil)
                                     : device.U32(d3d::kDeviceOffsetRenderTargets + source * 4);
-  HostSurface *surface = GetHostSurfaceLocked(source_va);
+  HostSurface *surface = source <= 4 ? DeviceSurfaceLocked(device, source) : GetHostSurfaceLocked(source_va);
+  if (source < 4 && source_va) {  // fc4-nx (2026-11-11, diagnostic): resolves of fixed 2_10_10_10 views, header vs device
+    const auto *h = static_cast<const d3d::SurfaceDesc *>(SurfaceHeaderLocked(source_va));
+    if (h && (u32(h->Format) & 0x3F) == 54) {
+      static uint32_t logged = 0;
+      const d3d::DestinationPacket &dp = device.dev().m_DestinationPacket;
+      const u32 color_info[4] = {dp.Color0Info, dp.Color1Info, dp.Color2Info, dp.Color3Info};
+      if (logged++ < 8)
+        RGPU_INFO("[renut] resolve of {:08X} (RT{}, fixed 2_10_10_10): header info {:08X} colour info {:08X} size "
+                  "{:08X}; device surface info {:08X} colour info {:08X}; target {:08X} host format {}",
+                  source_va, source, u32(h->SurfaceInfo), u32(h->ColorInfo), u32(h->Size), u32(dp.SurfaceInfo),
+                  color_info[source], surface ? surface->guest_va : 0u, surface ? u32(surface->format) : 0u);
+    }
+  }
   if (surface && source_rect && (source_rect->x2 > int32_t(surface->width) || source_rect->y2 > int32_t(surface->height)))
     NoteResolveExtentLocked(surface, source_rect->x1, source_rect->y1, u32(source_rect->x2), u32(source_rect->y2));  // fc4-nx (2026-11-10)
   if (g_frame_resolve_dests.size() < 256)
@@ -13205,11 +13247,25 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
                                           int32_t(host_x) + (rect.right - rect.left),
                                           int32_t(host_y) + (rect.bottom - rect.top));
         const bool multisampled = surface->samples != plume::RenderSampleCount::COUNT_1;
+        // fc4-nx (2026-11-11, banjo_renut_resolve_7e3_bits): see the cvar.
+        const u32 view_format = surface->format_word & 0x3F;
+        const u32 dest_fetch = dest_format ? u32(dest_format->dword[1]) & 0x3F : 0u;
+        const bool bits_7e3 = clamp_scale > 0.0f && REXCVAR_GET(banjo_renut_resolve_7e3_bits) &&
+                              surface->written_format == 63 && (view_format == 7 || view_format == 54) &&
+                              (dest_fetch == 7 || dest_fetch == 54) &&
+                              surface->format == plume::RenderFormat::R16G16B16A16_FLOAT;
+        if (bits_7e3)
+          box_source = nullptr;
         if (box_source && DownsampleResolveCopy(box_source, dest, rect, host_x, host_y, clamp_scale)) {
           // fc4-nx: drawn
           if (clamp_scale != 0.0f)
             dest->resolve_exp_bias = 0;
-        } else if (clamp_scale != 0.0f && !multisampled && DrawResolveCopy(surface, dest, rect, host_x, host_y, clamp_scale)) {
+        } else if (clamp_scale != 0.0f && !multisampled &&
+                   DrawResolveCopy(surface, dest, rect, host_x, host_y, clamp_scale, bits_7e3)) {
+          static uint32_t bits_logged = 0;
+          if (bits_7e3 && bits_logged++ < 4)
+            RGPU_INFO("[renut] resolve {:08X} -> {:08X}: 7e3 target through a fixed 2_10_10_10 view, its 7e3 bits "
+                      "written as 10-bit unorm (banjo_renut_resolve_7e3_bits)", surface->guest_va, dest->guest_va);
           dest->resolve_exp_bias = 0;  // fc4-nx: applied in the copy
           static uint32_t clamp_logged = 0;
           if (clamp_logged++ < 6)
@@ -13325,8 +13381,7 @@ bool ReadRenderTargetLocked(const u8 *device_state, u32 source, u32 &width, u32 
   const GuestDevice device(device_state);
   if (!device.valid() || source >= d3d::kMaxRenderTargets)
     return false;
-  HostSurface *surface =
-      GetHostSurfaceLocked(device.U32(d3d::kDeviceOffsetRenderTargets + source * 4));
+  HostSurface *surface = DeviceSurfaceLocked(device, source);  // fc4-nx (2026-11-11)
   if (!surface || surface->depth || !surface->texture)
     return false;
   width = std::min(width, surface->width);

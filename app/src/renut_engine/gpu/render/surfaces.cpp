@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>  // banjo-nx (2026-10-28): dynamic resolution
+#include <cstring>
 #include <numeric>
 #include <string>
 #include <unordered_map>
@@ -41,6 +42,13 @@ REXCVAR_DEFINE_BOOL(banjo_renut_resolve_extents, true, "Banjo/Renut",
                     "makes every target of that view's shape that large from its next use. Far Cry 4 tiles its "
                     "G-buffer (two tiles in 880-wide surfaces) and resolves the second tile at 864-1280, which an "
                     "880-wide target never drew: a third of the picture garbage. false: targets keep the surface size");
+REXCVAR_DEFINE_BOOL(banjo_renut_surface_registers, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-11): the targets of draws and resolves placed by the device's register copies "
+                    "(RB_SURFACE_INFO, RB_COLOR_INFO / RB_DEPTH_INFO, written at the bind) when the surface header in "
+                    "guest memory contradicts them. Far Cry 4 frees the surfaces it makes for its resolves at a "
+                    "lowered resolution through its own D3D code before Renut's render thread gets there: their "
+                    "headers were zeros or strings, the HDR picture resolved from an empty target (the purple / "
+                    "yellow herringbone frames), and garbage sizes grew targets");
 REXCVAR_DEFINE_BOOL(banjo_renut_grow_tested_depth, true, "Banjo/Renut",
                     "fc4-nx (2026-11-11): a depth target that a draw tests, bound with larger colour targets, grows to "
                     "their size (Maxwell renders no further than the smallest attachment)");
@@ -683,8 +691,11 @@ void NoteResolveExtentLocked(const HostSurface *surface, int32_t x1, int32_t y1,
 // whole draw, on Maxwell the draw stops at the depth target's edge. What the target held is lost once, at the growth.
 bool GrowDepthForColorLocked(const HostSurface *depth, uint32_t width, uint32_t height) {
   static const bool on = REXCVAR_GET(banjo_renut_grow_tested_depth);
-  if (!on || !depth || !depth->depth || width > 2048 || height > 2048 ||
-      (width <= depth->width && height <= depth->height))
+  // fc4-nx (2026-11-11, hw17): screen-sized at most, and no more than 2.25 times the depth target on each side. FC4's
+  // stencil-marking draws bind colour surfaces with garbage sizes (7361x352, 640x1543, 1x2049): hw17 grew its
+  // half-resolution depth target to 1280x1543.
+  if (!on || !depth || !depth->depth || width > 1280 || height > 736 || width * 4 > depth->width * 9 ||
+      height * 4 > depth->height * 9 || (width <= depth->width && height <= depth->height))
     return false;
   uint64_t own = 0;
   for (const auto &[key, target] : g_targets) {
@@ -862,16 +873,20 @@ HostSurface *DownsampleSourceLocked(const HostSurface *surface) {
 
 HostSurface *GetHostSurfaceSlow(u32 surface_va, const d3d::SurfaceDesc *desc);
 
+// fc4-nx (2026-11-11): see surfaces.h.
+const void *SurfaceHeaderLocked(u32 surface_va) {
+  return GuestPtr<const d3d::SurfaceDesc>(surface_va + sizeof(d3d::Resource));
+}
+
 HostSurface *GetHostSurfaceLocked(u32 surface_va) {
   if (!surface_va)
     return nullptr;
   // Targets made before the first Swap are of the configured scale too.
   if (!g_resolution_latched)
     LatchResolutionScaleLocked();
-  const auto *desc = GuestPtr<const d3d::SurfaceDesc>(surface_va + sizeof(d3d::Resource));
+  const auto *desc = static_cast<const d3d::SurfaceDesc *>(SurfaceHeaderLocked(surface_va));  // fc4-nx (2026-11-11)
   if (!desc)
     return nullptr;
-
   const bool memo = banjo::renut_gpu::CpuMemosOn();
   SurfaceMemo &m = g_surface_memo[(surface_va * 0x9E3779B1u) >> 26];
   if (memo && m.epoch == g_surface_epoch && m.va == surface_va && m.size == desc->Size &&
@@ -898,6 +913,82 @@ HostSurface *GetHostSurfaceLocked(u32 surface_va) {
   }
   if (g_ui.redirect && result && result == g_ui.scene)
     return g_ui.surface.get();  // banjo-nx (2026-10-21, internal resolution)
+  if (g_ui_depth.redirect && result && result == g_ui_depth.scene)
+    return g_ui_depth.surface.get();
+  return result;
+}
+
+// fc4-nx (2026-11-11, banjo_renut_surface_registers): see surfaces.h.
+namespace {
+// The D3DFORMAT low 6 bits (texture format) a colour target's RB_COLOR_INFO format reads as; 0: any.
+bool ColorFormatMatches(u32 d3d_format, u32 color_info) {
+  const u32 low = d3d_format & 0x3F;
+  switch ((color_info >> 16) & 0xF) {
+  case 0: case 1: return low == 6;
+  case 2: case 10: return low == 7 || low == 54;
+  case 3: case 12: return low == 63;
+  case 4: return low == 25;
+  case 5: return low == 26;
+  case 6: return low == 31;
+  case 7: return low == 32;
+  case 14: return low == 36;
+  case 15: return low == 37;
+  default: return true;
+  }
+}
+u32 ColorFormatWord(u32 color_info) {
+  switch ((color_info >> 16) & 0xF) {
+  case 0: case 1: return 0x18280186u;
+  case 2: case 10: return 0x1A2001B6u;
+  case 3: case 12: return 0x1A2201BFu;
+  case 4: return 0x18280100u | 25u;
+  case 5: return 0x18280100u | 26u;
+  case 6: return 0x18280100u | 31u;
+  case 7: return 0x18280100u | 32u;
+  case 14: return 0x18280100u | 36u;
+  case 15: return 0x18280100u | 37u;
+  default: return 0x18280186u;
+  }
+}
+uint64_t g_register_overrides = 0;
+}  // namespace
+
+HostSurface *GetHostSurfaceRegsLocked(u32 surface_va, u32 surface_info, u32 target_info, bool depth_slot,
+                                      bool exact_pitch) {
+  static const bool on = REXCVAR_GET(banjo_renut_surface_registers);
+  if (!on || !surface_va)
+    return GetHostSurfaceLocked(surface_va);
+  const auto *h = static_cast<const d3d::SurfaceDesc *>(SurfaceHeaderLocked(surface_va));
+  const u32 reg_pitch = surface_info & 0x3FFF;
+  if (!h || !reg_pitch)
+    return GetHostSurfaceLocked(surface_va);
+  const u32 pitch = u32(h->SurfaceInfo) & 0x3FFF;
+  const bool header_depth = d3d::IsDepthFormat(h->Format);
+  const bool stale = !pitch || (u32(h->ColorInfo) & 0xFFF) != (target_info & 0xFFF) ||
+                     (exact_pitch && pitch != reg_pitch) || header_depth != depth_slot;
+  if (!stale)
+    return GetHostSurfaceLocked(surface_va);
+  if (depth_slot && !header_depth)
+    return GetHostSurfaceLocked(surface_va);  // no depth D3DFORMAT to give it: as before
+  d3d::SurfaceDesc d;
+  std::memcpy(&d, h, sizeof(d));
+  d.SurfaceInfo = surface_info;
+  d.ColorInfo = target_info;
+  if (d3d::SurfaceWidth(d.Size) > reg_pitch || d3d::SurfaceHeight(d.Size) > 2048)
+    d.Size = ((reg_pitch - 1) << 18) | ((16u - 1) << 3);  // the pitch wide: the view's target keeps its own size
+  if (!depth_slot && !ColorFormatMatches(d.Format, target_info))
+    d.Format = ColorFormatWord(target_info);
+  ++g_register_overrides;
+  static uint32_t logged = 0;
+  if (logged++ < 12 || (logged % 4096) == 0)
+    RGPU_INFO("[renut] surface {:08X}: header (info {:08X} colour info {:08X} size {:08X} format {:08X}) against the "
+              "device's registers (info {:08X} colour info {:08X}): placed by the registers, size {:08X} format "
+              "{:08X} ({} so far, banjo_renut_surface_registers)", surface_va, u32(h->SurfaceInfo),
+              u32(h->ColorInfo), u32(h->Size), u32(h->Format), surface_info, target_info, u32(d.Size),
+              u32(d.Format), g_register_overrides);
+  HostSurface *result = GetHostSurfaceSlow(surface_va, &d);
+  if (g_ui.redirect && result && result == g_ui.scene)
+    return g_ui.surface.get();
   if (g_ui_depth.redirect && result && result == g_ui_depth.scene)
     return g_ui_depth.surface.get();
   return result;

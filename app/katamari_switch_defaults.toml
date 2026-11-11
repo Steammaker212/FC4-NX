@@ -256,6 +256,7 @@ banjo_xma_frame_cache = false
 banjo_renut_diag_noise_probe = true
 # hw16's result (fc4.log 09:0x-09:20, "[noise]"): all on 415 / 2921 frames noisy (14 %); 72 (barrier merge) off 14 / 524
 # (3 %); 14 off 19 %, 18 off 14 %, 39 off 20 %, 71 off 12 %, 73 off 11 %, 74 off 12 %. hw17: merge off (above); the A/B
-# goes on over the rest.
-banjo_renut_ab_targets = "71,73,74,14,39"
+# goes on over the rest. hw17: no target removed the rest (5-10 % each); the cause was the surface headers read late
+# (banjo_renut_surface_header_snapshots, 2026-11-11). hw18: no A/B (everything on), the noise counter kept.
+banjo_renut_ab_targets = ""
 banjo_renut_ab_s = 5

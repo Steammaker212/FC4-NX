@@ -82,6 +82,10 @@ struct HostSurface {
   // banjo-nx (2026-10-19, banjo_renut_resolve_skip): bumped by every draw that can write it (a colour write mask; for
   // depth, a depth write or stencil writes) and every clear of it; part of a resolve's signature.
   uint64_t writes = 0;
+  // fc4-nx (2026-11-11, banjo_renut_resolve_7e3_bits): the guest texture format (low 6 bits of the surface header's
+  // format word) of the view the last draw or clear wrote it through: 63 (2_10_10_10_FLOAT_EDRAM) means its EDRAM holds
+  // 7e3 bits.
+  u32 written_format = 0;
 
   // The view and bindless slot shaders read the target through (depth
   // resolves); made on first use, see SurfaceSampleSlotLocked.
@@ -158,6 +162,15 @@ uint32_t InternalHeightsWord();
 // The host target for the D3DSurface at 'surface_va', created or rebuilt as
 // needed. nullptr for 0 or when the target cannot be created.
 HostSurface *GetHostSurfaceLocked(u32 surface_va);
+// fc4-nx (2026-11-11): the surface header (d3d::SurfaceDesc) in guest memory, nullptr for an unmapped address.
+const void *SurfaceHeaderLocked(u32 surface_va);
+// fc4-nx (2026-11-11, banjo_renut_surface_registers): GetHostSurfaceLocked for a surface the device has bound, its
+// header checked against the register copies the bind wrote into the device (RB_SURFACE_INFO and the slot's
+// RB_COLOR_INFO / RB_DEPTH_INFO, from the draw's or resolve's device snapshot): a header that contradicts them (no
+// pitch, another EDRAM base, RT0's pitch differing, a depth format in a colour slot or the reverse) is memory the game
+// has since freed or reused, and the registers (what the console's GPU uses) place the target.
+HostSurface *GetHostSurfaceRegsLocked(u32 surface_va, u32 surface_info, u32 target_info, bool depth_slot,
+                                      bool exact_pitch);
 // banjo-nx (2026-10-20, from sa2-nx, banjo_renut_chain_reuse): banjo-nx's surface epoch (bumped by every target built, retired,
 // unused or rebound, the resolution scale latched and the tiling extent set).
 uint64_t SurfaceEpochLocked();

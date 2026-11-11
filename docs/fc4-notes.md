@@ -831,3 +831,57 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
 - Still open: near objects are now lit but too bright (white grass, cyan-white rock on PC, as the console's hw12). The
   exposure is not the cause: c48.x stays 3.341 in gameplay with near objects black (pcfinal1) and lit (pcnear3); the
   near lighting itself runs hot (suspects: the sun's shadow term from the 2304x768 atlas, the light buffer's scale).
+
+## Console run hw17 (2026-11-11) and hw18: the overexposure is the 7e3 picture; the noise reproduced on PC
+- hw17 "[noise]": windows at ~30 fps (GPU ~30 ms a frame) 0 % noisy, windows at 12-18 fps (GPU 66-86 ms, the fire
+  scene) 25-58 %. No A/B target (14, 39, 71, 73, 74) removes it. A noisy frame: the whole scene behind a purple /
+  yellow / teal herringbone, the fire and smoke right over it, now and then the scene black.
+- **Overexposure (PC and console): the composite decodes 7e3 bits.** FC4 draws its HDR picture into a 7e3 target
+  (D3DFMT 1A2201BF, 2_10_10_10_FLOAT_EDRAM) and resolves it through a second surface over the same EDRAM with the fixed
+  format 1A2001B6 (2_10_10_10_AS_16_16_16_16), no exponent bias, into the texture the composite samples with exponent
+  adjust +3 (t1 of ps_97f6587d89ad217a). The console's resolve reads the EDRAM's 7e3 bits as 10-bit unorm, so the
+  texture holds each channel's 7e3 code; the composite takes floor(8 x t) as the exponent and frac as the mantissa and
+  rebuilds the value with exp2 (then bloom, the particle buffer t3, a filmic curve, sqrt, a 3D LUT). Renut's float
+  target copied the values, which the decode blew up exponentially: the white, washed-out picture, worst on bright near
+  objects. New banjo_renut_resolve_7e3_bits (true): a target last written through a 7e3 view (HostSurface::
+  written_format 63) resolved through a fixed 2_10_10_10 view into a 2_10_10_10 texture is copied as the 7e3 codes /
+  1023 (resolve_copy_ps param0 7, Xenia's float-to-7e3 rounding). PC run pcbits1: normal exposure and colour (the phone
+  scene, grass, rock, sky). The first resolve of the pair (the 7e3 view, bias -5, exp adjust +2) lands in the same page
+  and is overwritten, as on the console.
+- The light buffer (t3 of the lighting pass) is FC4's GI: ps_c1155dbb6bd3186c samples six 16_16 probe maps at the
+  pixel's world XY (scale / bias in the shader), blends to a constant ambient with distance and writes sqrt; cleared to
+  1 where the sky is (depth beyond c252.z). The lighting squares it, times c92.x, as the ambient of the diffuse and the
+  reflection. Its view (L3) and the sun's 2304x768 three-cascade atlas (L2) look right.
+- **Noise reproduced on PC:** run pcsmaa1 (banjo_renut_diag_frame_sleep_ms 50, so FC4 drops its resolution) has the
+  console's frames in the fire scene: 143 of 2,828 frames noisy. (SMAA, Switch-only in the defaults, is not involved:
+  "0 frames", FC4's composite is not in its list.) New: "[noise] frame N noisy" per frame, to match with the trace.
+- **Noise cause: surface headers read a frame late.** pcnz1 (the same, trace every 2 s): noisy frames often every
+  other frame (1721, 1723, ... 1737). Traced noisy frame 2287: the second HDR resolve's source was AD311B30, "view of
+  AD314740 (info 00000000 format 1A2001B6)", a separate host target (host format 20) with other contents; in clean
+  frames the same resolve's surfaces (AD3107E0, AD311B00, ... a new one each frame) join the 7e3 float target (view of
+  B2F0AFE0, info 14000500), or never reach Renut. At a lowered resolution FC4 makes D3DSurface objects for its
+  resolves every frame through its own D3D code (CreateSurface and Destroy are not hooked in FC4) and frees them; the
+  console's GPU never reads a surface header (D3D writes RB_SURFACE_INFO / RB_COLOR_INFO at the bind), but Renut's
+  render thread read them in guest memory when it replayed the draws and resolves, a frame or two behind the game: by
+  then the memory was zeros (pitch 0: another target) or another surface's. Slow frames (the console's fire scene, a
+  PC with banjo_renut_diag_frame_sleep_ms) put the render thread further behind and FC4 at the lower resolution.
+  A first try copied the header at the SetRenderTarget / SetDepthStencilSurface hooks: no effect (pcsnap1: 33
+  noisy frames), as d3d/hooks/state.cpp is not built for FC4 (its own D3D setters write the device); removed. pcsnap3
+  logged the resolves of fixed 2_10_10_10 views: the bad ones had headers "info 00000000 colour info 00000000" or
+  ASCII ("74656E73", "6974795F": the memory reused for strings), while the device's register copies at the resolve
+  were right every time (surface info 14000500, colour info 00020000: pitch 1280, EDRAM base 0, the 7e3 target's).
+  **Fix: banjo_renut_surface_registers (true).** D3D's SetRenderTarget / SetSurfaceInfo / SetDepthStencilSurface
+  copy RB_SURFACE_INFO and RB_COLOR_INFO / RB_DEPTH_INFO into the device (m_DestinationPacket), which each draw's and
+  resolve's device snapshot carries. GatherTargets and the resolves look up a slot's surface through
+  GetHostSurfaceRegsLocked: a header that contradicts those registers (no pitch, another EDRAM base, RT0's pitch
+  differing, a depth format in a colour slot) is placed by the registers instead (size kept within the pitch,
+  format from the colour info when the header's does not match). pcregs1 (slowed as pcsmaa1): 0 of 2,831 frames
+  noisy, the fire scene clean.
+  At normal speed (pcfinal2: 0 of 4,799 noisy) the override also catches FC4 rewriting a surface object in place
+  after the bind (header 8_8_8_8 at EDRAM 0x540, registers 2_10_10_10 at 0): the registers are what the console used.
+- Also in hw18: GrowDepthForColorLocked ignores colour sizes beyond 1280x736 or 9/4 of the depth (the garbage-header
+  sizes such as 1x2049 / 4257x704 had grown a depth target to 1280x1543); "[noise] frame N noisy" per frame.
+- Still open: the minimap's background is black on PC (pre-existing; icons draw).
+- Switch hw18 NRO (D:\switch\fc4-nx\fc4-nx.nro, hw17 kept as fc4-nx.hw17.nro.bak; ELF out/switch_runs/renut_hw18.elf):
+  banjo_renut_resolve_7e3_bits, banjo_renut_surface_registers, the growth limit; in-run A/B off
+  (banjo_renut_ab_targets ""), the noise counter on. hw17's 13 clips are in out/switch_runs/hw17/album (deleted from SD).
