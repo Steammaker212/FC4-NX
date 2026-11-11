@@ -639,3 +639,16 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   _after_s, banjo_renut_diag_readback_stats, banjo_renut_diag_color_to_depth (stencil byte histogram); the trace logs
   each draw's shader hashes (out/fc4_shaders/census_exp/hlsl/ps_<hash>.hlsl), the pixel shaders per target run, the
   composite / lighting pixel constants and window offset changes.
+- **Still wrong (PC, 2026-11-10 22:15): near objects unlit.** After the lighting passes the HDR target is exactly 0 on
+  everything closer than ~300 m (Pagan Min, the table, the pillars); distant scenery, sky and sun shafts are right, and
+  the auto-exposure (c48.z 24 -> 112) climbs on the dark measure. Ruled out by runs: depth test (pctest1), depth +
+  stencil tests of the 2-target lighting pass (pctest3), restored stencil (centre bytes 0x84 / 0x01 / 0x02, pcc2d4),
+  shadow maps (all 768x768 depth-only draws skipped, pcnoshadow2), the height map (its passes skipped, pcnoheight; and
+  banjo_renut_resolve_integer_fetch off, pctest2), the half-res light buffer (snapshot non-zero, pcsnap1). Lighting
+  shaders: ps_731cb5fa99c50d91 / ps_a57633f52587b8f9 (dinner), ps_9269ca990424132c (gameplay), ps_3748ac14b5710605 and
+  the 2-target NOT_EQUAL-0 pass; their near/far blend is saturate(dist / 32 - 9) (c76). Next: snapshot the lighting
+  output per pass (banjo_renut_diag_snapshot takes textures only; a render-target variant is needed), or compare with
+  the Switch build (hw10), whose depth words already carried the stencil.
+- More diagnostics: banjo_renut_diag_snapshot ("<ps hash>:<slot>", shown by show_texture SNAP),
+  banjo_renut_diag_skip_depth_only (width), banjo_renut_diag_tests_colors (target count for diag_gbuffer_tests).
+- Switch hw10 NRO (D:\switch\fc4-nx\fc4-nx.nro; ELF out/switch_runs/renut_hw10.elf) has everything above.

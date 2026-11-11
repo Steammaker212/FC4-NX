@@ -69,6 +69,8 @@ REXCVAR_DEFINE_BOOL(banjo_renut_d3d12_depth_flip, true, "Banjo/Renut",
 REXCVAR_DEFINE_BOOL(banjo_renut_resolve_fixed_clamp_signed, true, "Banjo/Renut",
                     "fc4-nx (2026-11-10, a test): banjo_renut_resolve_fixed_clamp also for signed (SNORM) targets "
                     "(FC4's 64x64 16_16 luminance); false: those copied as before, the bias at the bind");
+REXCVAR_DEFINE_INT32(banjo_renut_diag_skip_depth_only, 0, "Banjo/Diagnostics",
+                     "fc4-nx (2026-11-10): depth-only draws into depth targets of this width are not drawn (0: off)");
 REXCVAR_DEFINE_STRING(banjo_renut_diag_snapshot, "", "Banjo/Diagnostics",
                       "fc4-nx (2026-11-10): '<pixel shader hash>:<fetch slot>': copy that slot's texture at the first "
                       "draw of that shader each frame (banjo_renut_diag_show_texture SNAP shows it)");
@@ -9801,6 +9803,12 @@ bool DiagSkipDraw(const GuestDevice &device) {
     }
     return out;
   }();
+  if (const int32_t size = REXCVAR_GET(banjo_renut_diag_skip_depth_only); size > 0) {
+    // fc4-nx (2026-11-10, diagnostic): depth-only draws into depth targets this wide (the shadow maps) not drawn.
+    Targets t;
+    if (GatherTargets(device, t) && !t.color_count && t.depth && t.depth->width == uint32_t(size))
+      return true;
+  }
   const bool trace = banjo::renut_gpu::ResolveTraceOn();
   static const bool snapshot = !REXCVAR_GET(banjo_renut_diag_snapshot).empty();
   if (skip.empty() && !trace && !snapshot)

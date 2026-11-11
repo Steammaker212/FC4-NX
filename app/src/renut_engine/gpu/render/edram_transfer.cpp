@@ -94,7 +94,10 @@ void ProbeWordsLocked(VideoState &s, HostSurface *color) {
   g_probe.w = std::min(256u, color->scale.Size(color->width));
   g_probe.h = std::min(256u, color->scale.Size(color->height));
   TransitionSurfaceLocked(color, plume::RenderTextureLayout::COPY_SOURCE);
-  const plume::RenderBox box(0, 0, int32_t(g_probe.w), int32_t(g_probe.h));
+  // The centre of the target (Far Cry 4's dinner scene: Pagan Min and the table).
+  const int32_t x0 = int32_t(std::max(0, int32_t(color->scale.Size(color->width)) / 2 - int32_t(g_probe.w) / 2));
+  const int32_t y0 = int32_t(std::max(0, int32_t(color->scale.Size(color->height)) / 2 - int32_t(g_probe.h) / 2));
+  const plume::RenderBox box(x0, y0, x0 + int32_t(g_probe.w), y0 + int32_t(g_probe.h));
   s.command_list->copyTextureRegion(
       plume::RenderTextureCopyLocation::PlacedFootprint(g_probe.buffer.get(), color->format, g_probe.w, g_probe.h, 1, 256),
       plume::RenderTextureCopyLocation::Subresource(color->texture.get(), 0, 0), 0, 0, 0, &box);
