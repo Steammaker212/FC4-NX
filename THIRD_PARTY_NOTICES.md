@@ -71,6 +71,6 @@ components are listed in its `NOTICES.md`.
 
 ## Trademarks
 
-Beautiful Katamari is a trademark of Bandai Namco Entertainment; the icon (`tools/switch/icon/katamari_icon.jpg`,
-`app/icon/app.ico`) is its cover artwork, © Bandai Namco. Nintendo Switch is a trademark of Nintendo. Xbox 360 is a
+Far Cry is a trademark of Ubisoft Entertainment. `app/icon/app.ico` is a plain placeholder drawn for this project.
+Nintendo Switch is a trademark of Nintendo. Xbox 360 is a
 trademark of Microsoft. This project is not affiliated with or endorsed by any of them.
