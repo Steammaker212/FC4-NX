@@ -938,3 +938,30 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   0x00080000); border colours are the console's three; fragment shader interlock is for an ROV-style EDRAM, not
   Renut's host targets.
 - Switch hw20 NRO (hw19 kept as fc4-nx.hw19.nro.bak; ELF out/switch_runs/renut_hw20.elf).
+
+## Console run hw20 (2026-11-12) and hw21: white-outs, boxes
+- hw20 (out/switch_runs/hw20: 10 clips, 4 screenshots, fc4.log; album deleted from SD): smoke fixed, no black flashes
+  (scratch dark.py), phone and healing better. The picture blows out to white from 00:10:30 and stays so (blue-white
+  rock, yellow leaves); hw18 / hw19 clips have short white stretches too. Boxed fire light on leaves and black blocks in
+  the sky, both worse while turning; the user's hw19 image has the leaves too.
+- **msaa_level 2 broke the half-resolution HDR copy.** FC4 makes it by resolving a 640x352 4x view nothing draws over
+  the 1280x704 1x HDR target (DownsampleResolveCopy, the 2x2 box). DownsampleSourceLocked asked for a host target of 4
+  samples; msaa_level 2 (hw19 / hw20) made it 2, the box path was skipped and the resolve read the empty 2x target.
+  Now the view's own MSAA from its TargetKey (bits 26-27 = 2, 4x). PC pcmsaa2b: "resolve of a 4x view nothing drew"
+  again with msaa_level 2. msaa_level back to 4 (template and the SD's katamari.toml; its old copy in
+  out/switch_runs/hw20/katamari.sd-before-hw21.toml): FC4 never draws a 4x target, so 2 saved nothing.
+- PC reproduces a white-out with banjo_renut_diag_frame_sleep_ms 50 (FC4's dynamic resolution), but not every run
+  (pcslow1-3 white from the wake-up; pcslow4-6 and the A/Bs not). In a white traced frame the exposure constant c48.x
+  (3.1-3.3, = E, 1/E, 8E, 1/8E) and the composite's bloom weight c65.x match the normal run; the composite is
+  ps_4028c59b1f01c10d (no half-res particle buffer) instead of ps_97f6587d89ad217a, and decodes the 7e3 bits the same.
+  The HDR picture is resolved twice into one page each frame (view 63 with bias 2^-5, then view 54 as bits: the
+  [trace] "bits_7e3" line); both reach the same page-keyed destination in order. Ruled out by A/B (each off):
+  clear_repeat, resolve_skip, resolve_extents (off leaves the lowered resolution's strip black), grow_tested_depth,
+  color_to_depth_swap / _mask. The 80x44 16_16_FLOAT grid the CPU reads back is per-tile depth (reversed Z, near 1),
+  not luminance.
+- **Boxes:** plume never calls dkCmdBufResolveDepthValues, and depth targets have hardware compression
+  (banjo_deko3d_depth_compression) while FC4 samples depth everywhere (lights, decals, sky, particles, fog). hw21 test:
+  depth compression off (Zcull off in hw19 left the boxes). PC (no compression) has no leaf boxes in the fire scene.
+- hw21 also traces a frame every 30 s (banjo_renut_diag_resolve_trace) for the white-outs' constants and resolves.
+- Switch hw21 NRO (hw20 kept as fc4-nx.hw20.nro.bak; ELF out/switch_runs/renut_hw21.elf).
+

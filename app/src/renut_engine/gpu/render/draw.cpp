@@ -13272,6 +13272,11 @@ void ResolveStateLocked(const u8 *device_state, u32 flags, const ClearRect *sour
                               surface->format == plume::RenderFormat::R16G16B16A16_FLOAT;
         if (bits_7e3)
           box_source = nullptr;
+        if ((dest_fetch == 7 || dest_fetch == 54) && banjo::renut_gpu::ResolveTraceOn())  // fc4-nx (diagnostic)
+          RGPU_INFO("[trace] resolve {:08X} ({}x{} host {} samples {}) -> {:08X}: fetch {} view {} written {} clamp {} "
+                    "box {} bits_7e3 {}", surface->guest_va, surface->width, surface->height, u32(surface->format),
+                    u32(surface->samples), dest->guest_va, dest_fetch, view_format, surface->written_format,
+                    clamp_scale, box_source ? box_source->guest_va : 0u, bits_7e3);
         if (box_source && DownsampleResolveCopy(box_source, dest, rect, host_x, host_y, clamp_scale)) {
           // fc4-nx: drawn
           if (clamp_scale != 0.0f)

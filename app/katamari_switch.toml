@@ -17,7 +17,7 @@ banjo_show_fps = false
 
 # Samples per pixel of the game's edge smoothing (MSAA): 4 (the game's own), 2 or 1 (off).
 # Fewer gives rougher edges and less GPU work.
-msaa_level = 2
+msaa_level = 4
 
 # Frame rate cap: "Off" (the game's own pacing) or "30".
 frame_cap = "Off"

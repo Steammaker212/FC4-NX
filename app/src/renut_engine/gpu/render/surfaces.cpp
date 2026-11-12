@@ -841,7 +841,7 @@ uint64_t NextSurfaceWriteSeq() {
 }
 
 HostSurface *DownsampleSourceLocked(const HostSurface *surface) {
-  if (!surface || surface->depth || surface->samples != plume::RenderSampleCount::COUNT_4)
+  if (!surface || surface->depth || surface->samples == plume::RenderSampleCount::COUNT_1)
     return nullptr;
   uint64_t own = 0;
   for (const auto &[key, target] : g_targets) {
@@ -850,7 +850,11 @@ HostSurface *DownsampleSourceLocked(const HostSurface *surface) {
       break;
     }
   }
-  if (!own)
+  // fc4-nx (2026-11-12, hw21): the view's own MSAA (TargetKey bits 26-27, RB_SURFACE_INFO: 2 = 4x), not the host
+  // target's: msaa_level 2 makes a 4x view 2x on the host, and the 1x target under it (twice the pitch) was not found:
+  // Far Cry 4's half-resolution HDR copy (a resolve of a 4x view nothing drew) read an empty target, and the luminance
+  // behind its auto-exposure with it (the white, blown-out picture of hw19 / hw20).
+  if (!own || ((own >> 26) & 3) != 2)
     return nullptr;
   // TargetKey: EDRAM base 0-11, pitch 12-25, samples 26-27, depth 28, scale 29-31, host format above.
   const uint64_t pitch = (own >> 12) & 0x3FFF;
