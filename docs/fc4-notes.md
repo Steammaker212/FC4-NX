@@ -881,7 +881,7 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   after the bind (header 8_8_8_8 at EDRAM 0x540, registers 2_10_10_10 at 0): the registers are what the console used.
 - Also in hw18: GrowDepthForColorLocked ignores colour sizes beyond 1280x736 or 9/4 of the depth (the garbage-header
   sizes such as 1x2049 / 4257x704 had grown a depth target to 1280x1543); "[noise] frame N noisy" per frame.
-- Still open: the minimap's background is black on PC (pre-existing; icons draw).
+- The minimap's background is black on PC only; the user reports the console's minimap fine.
 - Switch hw18 NRO (D:\switch\fc4-nx\fc4-nx.nro, hw17 kept as fc4-nx.hw17.nro.bak; ELF out/switch_runs/renut_hw18.elf):
   banjo_renut_resolve_7e3_bits, banjo_renut_surface_registers, the growth limit; in-run A/B off
   (banjo_renut_ab_targets ""), the noise counter on. hw17's 13 clips are in out/switch_runs/hw17/album (deleted from SD).
@@ -915,3 +915,26 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   (pcprof1, 5.9 ms a frame): shadow cascades 15 % (305 depth draws into three 768x768 views), resolves 9 %, the
   G-buffer's terrain / foliage 8 %.
 - Switch hw19 NRO (hw18 kept as fc4-nx.hw18.nro.bak; ELF out/switch_runs/renut_hw19.elf). hw18's album deleted from SD.
+
+## Console run hw19 (2026-11-12) and hw20: the smoke is the stencil-only restore; 540p reverted
+- hw19 (out/switch_runs/hw19/album: 12 clips, 4 screenshots, deleted from SD): the sky at the wake-up right (the depth
+  tile swap stays); new black flashes, the scene drawn in a corner and a blown-out picture at times. The 540p / 648p
+  3D image (banjo_renut_render_height_*, with ps_97f6587d89ad217a as the composite marker) is deko3d-only and never ran
+  on PC; FC4 has three composites (97F6587D89AD217A, 4028C59B1F01C10D, C93EFBA9789F3658), so the scaled path switched
+  on and off between frames. hw20: 720 / 720 and banjo_renut_smaa_after_ps "" again (defaults, the player's toml
+  template and the SD's katamari.toml).
+- **Smoke through objects (PC and console):** FC4's half-resolution depth B2F0AE00 (640x352, EDRAM 0x750) gets its
+  depth from ps_0c610e898c7ca69a (SV_Depth, a downsample of the full depth), then its stencil marks from
+  ps_73757ece81680f5e through an 8_8_8_8 view at the same base with only R enabled (RB_COLOR_MASK 1: the stencil byte
+  of the D24S8 word). On the console that leaves the depth bytes as they were. Renut's colour-to-depth transfer took
+  the colour target's whole words, its never-written G / B / A bytes over the downsampled depth: the half-resolution
+  particles (GEQUAL on it: smoke, steam, fire) drew through everything. New banjo_renut_color_to_depth_mask (true):
+  HostSurface::written_channels (the colour write masks since the last transfer, 0xF for clears) picks the passes: R
+  alone, only the stencil bits; G / B / A, the depth. PC A/B pcmask0 / pcmask1 (fire scene, 110-125 s): the steam plume
+  behind the trees drawn over them without, hidden with; the transfer log shows "channels 1" for the half-res depths
+  and "channels F" for the full depth restores.
+- The pasted Vulkan list (GTA IV on Xenia): stencil export would make the eight stencil-bit passes one, but
+  Renut's deko3d path has no shader stencil export (hence the passes); depth clip is on as FC4 sets it (PA_CL_CLIP_CNTL
+  0x00080000); border colours are the console's three; fragment shader interlock is for an ROV-style EDRAM, not
+  Renut's host targets.
+- Switch hw20 NRO (hw19 kept as fc4-nx.hw19.nro.bak; ELF out/switch_runs/renut_hw20.elf).

@@ -45,6 +45,13 @@ REXCVAR_DEFINE_BOOL(banjo_renut_color_to_depth_swap, true, "Banjo/Renut",
                     "40-sample half of its 80x16 EDRAM tile, as the console's depth view of colour words does (depth "
                     "tiles hold their halves swapped). Without it Far Cry 4's restored depth was off in 40x16 blocks at "
                     "every depth edge: strips and staircases in the sky, boxed leaves, smoke over near objects");
+REXCVAR_DEFINE_BOOL(banjo_renut_color_to_depth_mask, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-12): banjo_renut_color_to_depth takes only the bytes the colour target's draws "
+                    "wrote (their colour write masks): R alone is the stencil byte, G / B / A the depth. Far Cry 4 "
+                    "writes its half-resolution stencil marks through an 8_8_8_8 view with only R enabled, over the "
+                    "depth its downsample wrote (ps_0c610e898c7ca69a, SV_Depth); taken whole, the colour target's "
+                    "never-written depth bytes replaced that depth and the half-resolution particles (smoke, steam, "
+                    "fire) drew through every object");
 REXCVAR_DEFINE_BOOL(banjo_renut_color_to_depth, true, "Banjo/Renut",
                     "fc4-nx (2026-11-10): a depth target bound after the 8_8_8_8 colour target over its EDRAM was "
                     "written takes that target's words as its depth and stencil (Far Cry 4's depth restore before the "
@@ -242,10 +249,16 @@ bool ColorToDepthBeforeBindLocked(HostSurface *depth) {
   cmd->setFramebuffer(fb.second.get());
   cmd->setViewports(plume::RenderViewport(0.0f, 0.0f, float(width), float(height)));
   cmd->setScissors(plume::RenderRect(0, 0, int32_t(width), int32_t(height)));
-  cmd->setPipeline(depth_pipeline);
-  cmd->setGraphicsPushConstants(0, &push, 0, sizeof(push));
-  cmd->drawInstanced(3, 1, 0, 0);
-  if (stencil) {
+  // fc4-nx (2026-11-12, banjo_renut_color_to_depth_mask): only the bytes written since the last transfer.
+  static const bool by_mask = REXCVAR_GET(banjo_renut_color_to_depth_mask);
+  const u32 channels = by_mask && color->written_channels ? color->written_channels : 0xFu;
+  color->written_channels = 0;
+  if (channels & 0xE) {
+    cmd->setPipeline(depth_pipeline);
+    cmd->setGraphicsPushConstants(0, &push, 0, sizeof(push));
+    cmd->drawInstanced(3, 1, 0, 0);
+  }
+  if (stencil && (channels & 1)) {
     cmd->clearDepthStencil(false, true, 0.0f, 0);
     for (uint32_t bit = 0; bit < 8; ++bit) {
       plume::RenderPipeline *pipeline = Pipeline(s, depth->format, 1 + bit);
@@ -265,9 +278,11 @@ bool ColorToDepthBeforeBindLocked(HostSurface *depth) {
   depth->write_seq = NextSurfaceWriteSeq();
   depth->transfer_seq = color->write_seq;
   static uint32_t logged = 0;
-  if (logged++ < 4)
-    RGPU_INFO("[renut] depth target {:08X} ({}x{}) takes the words of colour target {:08X} over its EDRAM "
-              "(banjo_renut_color_to_depth)", depth->guest_va, depth->width, depth->height, color->guest_va);
+  if (logged++ < 4 || banjo::renut_gpu::ResolveTraceOn())  // fc4-nx (2026-11-12): every one in a traced frame
+    RGPU_INFO("[renut] depth target {:08X} ({}x{}, EDRAM {:03X}) takes the words of colour target {:08X} ({}x{}, host "
+              "format {}, channels {:X}) over its EDRAM (banjo_renut_color_to_depth)", depth->guest_va, depth->width,
+              depth->height, u32(depth->key & 0xFFF), color->guest_va, color->width, color->height,
+              u32(color->format), channels);
   return true;
 }
 

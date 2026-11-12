@@ -86,6 +86,9 @@ struct HostSurface {
   // format word) of the view the last draw or clear wrote it through: 63 (2_10_10_10_FLOAT_EDRAM) means its EDRAM holds
   // 7e3 bits.
   u32 written_format = 0;
+  // fc4-nx (2026-11-12, banjo_renut_color_to_depth_mask): a colour target's channels (RB_COLOR_MASK bits, R = 1) its
+  // draws and clears wrote since banjo_renut_color_to_depth last took its words; 0: none recorded.
+  u32 written_channels = 0;
 
   // The view and bindless slot shaders read the target through (depth
   // resolves); made on first use, see SurfaceSampleSlotLocked.

@@ -1937,8 +1937,11 @@ bool BindTargets(const Targets &t, bool depth_writes = true) {
               t.color_count ? u32(t.colors[0]->samples) : 0, t.depth ? t.depth->guest_va : 0,
               t.depth ? t.depth->width : 0, t.depth ? t.depth->height : 0, t.depth ? u32(t.depth->samples) : 0);
     if (t.color_count)  // fc4-nx (2026-11-10): the view's words, to match a resolve's source with what was drawn
-      RGPU_INFO("[trace]   colour 0 view of {:08X} (info {:08X} format {:08X} size {:08X})", t.colors[0]->guest_va,
-                t.colors[0]->info_word, t.colors[0]->format_word, t.colors[0]->size_word);
+      RGPU_INFO("[trace]   colour 0 view of {:08X} (info {:08X} format {:08X} size {:08X}); EDRAM bases: colour {:03X}"
+                "{}, depth {}", t.colors[0]->guest_va,
+                t.colors[0]->info_word, t.colors[0]->format_word, t.colors[0]->size_word, u32(t.colors[0]->key & 0xFFF),
+                t.color_count > 1 ? fmt::format(" {:03X}", u32(t.colors[1]->key & 0xFFF)) : std::string(),
+                t.depth ? fmt::format("{:03X}", u32(t.depth->key & 0xFFF)) : std::string("-"));
     g_trace_draws = 0;
   }
   if (g_bound.framebuffer != framebuffer) {
@@ -9265,6 +9268,7 @@ int FastDrawLocked(const u8 *device_state, const DrawCall &call, const ReplayCon
       ++targets.colors[i]->writes;
       targets.colors[i]->write_seq = NextSurfaceWriteSeq();  // fc4-nx (2026-11-10, banjo_renut_color_to_depth)
       targets.colors[i]->written_format = targets.colors[i]->format_word & 0x3F;  // fc4-nx (2026-11-11, banjo_renut_resolve_7e3_bits)
+      targets.colors[i]->written_channels |= (f.kp_hot.color_mask >> (4 * i)) & 0xF;  // fc4-nx (2026-11-12)
     }
   if (targets.depth) {
     const u32 dc = f.kp_hot.depth_control;
@@ -11151,6 +11155,7 @@ bool DrawStateLocked(const u8 *device_state, const DrawCall &call, const ReplayC
       ++targets.colors[i]->writes;
       targets.colors[i]->write_seq = NextSurfaceWriteSeq();  // fc4-nx (2026-11-10, banjo_renut_color_to_depth)
       targets.colors[i]->written_format = targets.colors[i]->format_word & 0x3F;  // fc4-nx (2026-11-11, banjo_renut_resolve_7e3_bits)
+      targets.colors[i]->written_channels |= (key.color_mask >> (4 * i)) & 0xF;  // fc4-nx (2026-11-12)
     }
   if (targets.depth) {
     const u32 dc = key.depth_control;
@@ -11849,6 +11854,7 @@ void ClearTargets(const Targets &t, u32 flags, const plume::RenderRect &rect, co
     ++c->writes;  // banjo-nx (banjo_renut_resolve_skip)
     c->write_seq = NextSurfaceWriteSeq();  // fc4-nx (2026-11-10, banjo_renut_color_to_depth)
     c->written_format = c->format_word & 0x3F;  // fc4-nx (2026-11-11, banjo_renut_resolve_7e3_bits)
+    c->written_channels = 0xF;  // fc4-nx (2026-11-12, banjo_renut_color_to_depth_mask)
     g_clears_whole += is_whole;
     if (repeat)
       ++g_clear_repeats;
@@ -11914,6 +11920,7 @@ void ClearTargets(const Targets &t, u32 flags, const plume::RenderRect &rect, co
     const plume::RenderRect alias_host = ScaleRect(alias_rect, a.scale);
     ++alias->writes;  // banjo-nx (banjo_renut_resolve_skip)
     alias->write_seq = NextSurfaceWriteSeq();  // fc4-nx (2026-11-10, banjo_renut_color_to_depth)
+    alias->written_channels = 0xF;  // fc4-nx (2026-11-12, banjo_renut_color_to_depth_mask)
     alias->clear_known = false;  // banjo-nx (banjo_renut_clear_repeat): not followed through aliases
     cmd->clearColor(0, clear_color, &alias_host, 1);
   }
