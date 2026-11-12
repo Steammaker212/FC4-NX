@@ -42,6 +42,10 @@ REXCVAR_DEFINE_BOOL(banjo_renut_resolve_extents, true, "Banjo/Renut",
                     "makes every target of that view's shape that large from its next use. Far Cry 4 tiles its "
                     "G-buffer (two tiles in 880-wide surfaces) and resolves the second tile at 864-1280, which an "
                     "880-wide target never drew: a third of the picture garbage. false: targets keep the surface size");
+REXCVAR_DEFINE_BOOL(banjo_renut_diag_pc_internal_scale, false, "Banjo/Diagnostics",
+                    "fc4-nx (2026-11-12), PC test of the Switch's internal resolution: gameplay frames (the final "
+                    "composite, banjo_renut_smaa_after_ps, within the last 30 frames) at 2/3 scale, menus and the HUD at "
+                    "1x, as banjo_renut_render_height_* on deko3d");
 REXCVAR_DEFINE_BOOL(banjo_renut_surface_registers_format, true, "Banjo/Renut",
                     "fc4-nx (2026-11-12): with banjo_renut_surface_registers, a colour surface header whose format "
                     "is not the one the slot's RB_COLOR_INFO names is another surface's (FC4 makes 8_8_8_8 surfaces "
@@ -431,7 +435,8 @@ void LatchResolutionScaleLocked() {
   // render_scale.h), and the console's mode picks the heights: the display's (720 handheld, banjo_renut_display_height_
   // docked docked) for the HUD and the swapchain, banjo_renut_render_height_handheld / _docked for the 3D image of
   // gameplay frames (those with the final composite within the last kMenuFrames frames). renut_resolution is not taken.
-  if (IsDeko3D()) {
+  static const bool pc_internal = REXCVAR_GET(banjo_renut_diag_pc_internal_scale);  // fc4-nx (2026-11-12)
+  if (IsDeko3D() || pc_internal) {
     const bool docked = ConsoleDocked();
     const int32_t display = docked ? banjo::renut_gpu::DisplayHeightDocked() : 720;
     const int32_t render =
@@ -537,7 +542,8 @@ void LatchResolutionScaleLocked() {
 #if defined(PLUME_DEKO3D)
     render_scale = CodeForHeightLocked(chosen);  // banjo-nx (2026-10-28, night_gpu5): the steps take turns on codes 4 and 6
 #else
-    render_scale = chosen == 720    ? RenderScale{}
+    render_scale = pc_internal      ? RenderScale{1}  // fc4-nx (2026-11-12): 2/3, the PC test
+                   : chosen == 720    ? RenderScale{}
                    : chosen == 1080 ? RenderScale{2}
                                     : RenderScale{docked ? RenderScale::kDockedCode : RenderScale::kHandheldCode};
 #endif

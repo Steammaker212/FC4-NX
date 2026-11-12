@@ -34,10 +34,14 @@ float main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Depth
     int2 texel = min(int2(uv * g_Push.translate), size - 1);
     if (g_Push.scale.x > 0.0)
     {
-        const float half_tile = floor(g_Push.scale.x + 0.5);  // float: uam has no integer division by a variable
-        const bool first_half = frac((float(texel.x) + 0.5) / (2.0 * half_tile)) < 0.5;
-        texel.x += int(first_half ? half_tile : -half_tile);
-        texel.x = clamp(texel.x, 0, size.x - 1);
+        // fc4-nx (2026-11-12, hw23): the swap in guest pixels (the host pixel's centre / s, +-40 within its 80-pixel
+        // tile, back * s): exact at the internal resolutions too (2/3, 3/4, 9/10), where 40 guest pixels are not a
+        // whole number of host ones and a rounded half tile drifted off the tiles (streaks at every depth edge).
+        // Float math: uam has no integer division by a variable.
+        const float s = g_Push.scale.x / 40.0;
+        const float guest_x = (float(texel.x) + 0.5) / s;
+        const bool first_half = frac(guest_x / 80.0) < 0.5;
+        texel.x = clamp(int(floor((guest_x + (first_half ? 40.0 : -40.0)) * s)), 0, size.x - 1);
     }
     const float4 color = g_Color[NonUniformResourceIndex(g_Push.textureIndex)].Load(int3(texel, 0));
     const uint4 bytes = uint4(saturate(color) * 255.0 + 0.5);

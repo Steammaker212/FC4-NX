@@ -1152,6 +1152,19 @@ void Video::WaitPreviousFrameLocked() {
   detail::WaitSlotLocked(s, (s.frame + kFramesInFlight - 1) % kFramesInFlight);
 }
 
+bool Video::PreviousFrameDoneLocked() {
+  auto &s = State();
+  const uint32_t prev = (s.frame + kFramesInFlight - 1) % kFramesInFlight;
+  if (!s.submitted[prev])
+    return true;
+#if defined(PLUME_DEKO3D)
+  if (!plume::Deko3DFenceCopyDone(detail::g_trim.frame_end[prev]))
+    return false;
+#endif
+  detail::WaitSlotLocked(s, prev);
+  return true;
+}
+
 UploadRing &Video::UploadsLocked() {
   auto &s = State();
   return s.uploads[s.frame];

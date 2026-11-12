@@ -995,3 +995,34 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
 - Depth compression on again (hw21's test: not the blocks; colour to depth 10 ms instead of 6). Trace every 60 s.
 - Switch hw22 NRO (hw21 kept as fc4-nx.hw21.nro.bak; ELF out/switch_runs/renut_hw22.elf).
 
+## Console run hw22 (2026-11-12) and hw23: the grid's meaning, 540p working, frame rate
+- hw22 (out/switch_runs/hw22: 16 clips, 9 screenshots, fc4.log; album deleted from SD): the picture right; some
+  black blocks in the sky left; swimmable water dark at the surface (underwater fine). 10-12 fps: the previous-frame
+  grid wait took 51-55 ms a frame on the console (0.01-0.12 ms on PC). GPU profile (84 ms a frame): 1280x704
+  colour+depth 45 ms (365 draws: G-buffer and lighting), resolves 7.4, colour to depth 7.1, shadow maps 6.0, 1280x720
+  colour 5.8. The game thread waits on it (73-84 ms Swap to Swap).
+- **The tile grid's meaning (grid dumps, banjo_renut_diag_grid_dump, PC run pcdump):** per tile the first half is the
+  nearest view depth (its sign a rare flag) and the second the farthest, larger farther (sky tiles brightest in both;
+  the second up to 9.2). Loading screens: every tile 1 / 0. No tile is ever "uniform" in gameplay. hw22's first
+  widening (pcgrid8) had the halves the other way round: it narrowed every range and dropped the flags, hence the black.
+  banjo_renut_readback_grid_widen (3): the nearest the least of the tiles within 3 and the previous grid (own sign
+  kept), the farthest the most. banjo_renut_readback_previous_frame no longer waits: the frame before's grid when its
+  fence has passed (Video::PreviousFrameDoneLocked), else the newest finished. PC with the old 3-frame-late grid
+  (slowed, same camera path): pcwiden0 11 flat black tile-percent against pcwiden3 2; the blocks at 112 / 116 s gone.
+- **540p working:** banjo_renut_smaa_after_ps lists all three composites, so gameplay frames stay scaled. The colour-
+  to-depth half-tile swap was rounded at fractional scales (40 guest pixels = 26.67 host at 2/3): streaks at every
+  depth edge; now computed in guest pixels (exact at 3/4 and 9/10, where a tile is 60 / 72 host pixels; at the PC
+  test's 2/3 a few isolated pixels remain). banjo_renut_diag_pc_internal_scale: the Switch's gameplay / menu scaling
+  at 2/3 on PC (pcscale2-4: about 300 composites scaled per 10 s, none at 1x). hw23: 540 handheld / 648 docked
+  (defaults, template, the SD's katamari.toml; its old copy in out/switch_runs/hw22/katamari.sd-before-hw23.toml).
+- Stencil restore: every bit is tested (rd=FF EQUAL 1 / 2, NOTEQUAL 0; values 0x84, 0x40, 0x08, 0x02, 0x01), so the
+  eight passes stay.
+- Settings in the executable (deeper work for frame rate): Dunia registers LodScale, RealTreesLodScale,
+  TerrainLodScale, ShadowQuality, VegetationQuality, WaterQuality, EnableDynamicResolution, MinimumDynamicResolution
+  and more by name and ID (sub_827C3560: name, id 0x0B13 for ShadowQuality, sub_824AF850); their values come from the
+  profile data. FC4's own dynamic resolution rarely goes below 1280x704 at 13 fps: its GPU-time measure likely sees
+  Renut's early fences.
+- Water dark at the surface: not yet found (hw22's traced frame at 02:25:51: the frame-unique shaders are decals and
+  G-buffer materials).
+- Switch hw23 NRO (hw22 kept as fc4-nx.hw22.nro.bak; ELF out/switch_runs/renut_hw23.elf). Trace off.
+

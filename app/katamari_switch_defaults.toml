@@ -194,17 +194,18 @@ banjo_deko3d_eager_kicks = true
 # fc4-nx (2026-11-12): Far Cry 4's final composite (the 7e3 decode, bloom, particles, tone curve, LUT): the 3D image
 # ends there, so banjo_renut_render_height_* scale it to the display before the HUD. SMAA off (GPU time).
 banjo_renut_smaa = false
-banjo_renut_smaa_after_ps = ""
+banjo_renut_smaa_after_ps = "97F6587D89AD217A,4028C59B1F01C10D,C93EFBA9789F3658"  # hw23: all three of FC4's composites
 banjo_renut_fur_shells_percent = 75
 banjo_renut_portrait_fur_shells_percent = 50
 banjo_renut_portrait_msaa_samples = 2
 # fc4-nx (2026-11-10, the user: optimise 720p first): 720 internal and output in both modes. Docked at 1080 the
 # heap ran out at New Game (render targets at 1.5x: 561 MB; GPU region peak 1.85 GB).
-# fc4-nx (2026-11-12): hw19 drew the 3D image at 540p / 648p; the console then had black frames (the lit scene
-# missing, the scene in a corner) and a blown-out picture while scaled, and FC4's three composites
-# (97F6587D89AD217A, 4028C59B1F01C10D, C93EFBA9789F3658) switched it on and off. hw20: 720 again.
-banjo_renut_render_height_handheld = 720
-banjo_renut_render_height_docked = 720
+# fc4-nx (2026-11-12, hw23, the user: stable 30): the 3D image at 960x540 handheld / 1152x648 docked, the HUD at 720p.
+# hw19's try failed on three things since fixed: only one of FC4's three composites was the marker (the scale switched
+# on and off), the depth tiles' half swap was rounded at the scale (streaks), and the HDR target's stale headers (the
+# white). At 3/4 and 9/10 the 80-pixel tiles are whole host pixels (60, 72). PC test: banjo_renut_diag_pc_internal_scale.
+banjo_renut_render_height_handheld = 540
+banjo_renut_render_height_docked = 648
 banjo_renut_display_height_docked = 720
 banjo_renut_upscale_filter = 0
 banjo_renut_host_mips = false
@@ -224,7 +225,7 @@ renut_gpu_profile = 30.0
 # luminance readback values (exposure). A short hitch at each traced frame.
 # hw21: on every 30 s (one short hitch each) for the white-outs: the composite's exposure / bloom constants and the
 # HDR picture's resolve path in the log while the picture is blown out (hw15 had it off for its hitches at 8-20 s).
-banjo_renut_diag_resolve_trace = true
+banjo_renut_diag_resolve_trace = false  # hw23: off (the white picture found in hw21's traces)
 banjo_renut_diag_resolve_trace_every_s = 60  # hw22: 60
 banjo_renut_diag_readback_stats = false
 banjo_renut_diag_gpu_shaders = false

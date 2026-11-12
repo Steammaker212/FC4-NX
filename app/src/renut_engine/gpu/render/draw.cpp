@@ -100,12 +100,22 @@ REXCVAR_DEFINE_INT32(banjo_renut_resolve_readback_texels, 4096, "Banjo/Renut",
                      "them with the CPU (the last finished one of each kind goes into each new destination at its resolve). 0: off")
     .range(0, 1 << 22);
 REXCVAR_DEFINE_BOOL(banjo_renut_readback_previous_frame, true, "Banjo/Renut",
-                    "fc4-nx (2026-11-12): Far Cry 4's CPU reads back an 80x44 16_16_FLOAT grid every frame (two "
-                    "values per 16x16-pixel tile, flags in their signs: sub_838B6B48) and decides per tile from it. "
-                    "Renut gave it a grid three frames old: at the console's 13 fps the tiles were 300 ms behind the "
-                    "view, and whenever it turned they came out black in the sky and lights came in boxes. Now the "
-                    "grid's resolve waits for the GPU to finish the frame before (as the next frame's start would) "
-                    "and the CPU gets that frame's grid, as on the console (it reads after its fence)");
+                    "fc4-nx (2026-11-12): Far Cry 4's CPU reads back an 80x44 16_16_FLOAT grid every frame, two values "
+                    "per 16x16-pixel tile with flags in their signs (sub_838B6B48), and treats a tile whose two values "
+                    "are 0 / 0, 1 / 1 or 1 / 0 as uniform. Renut gave it a grid three frames old. The grid's resolve now "
+                    "takes the frame before's when the GPU has finished it (deko3d: its fence, not waited for: hw22 "
+                    "waited and lost 55 ms a frame), else the newest finished one");
+REXCVAR_DEFINE_INT32(banjo_renut_diag_grid_dump, 0, "Banjo/Diagnostics",
+                     "fc4-nx (2026-11-12): write Far Cry 4's read-back tile grid every this many grids to grid_<n>.bin "
+                     "in the working directory (0: off)");
+REXCVAR_DEFINE_INT32(banjo_renut_readback_grid_widen, 3, "Banjo/Renut",
+                     "fc4-nx (2026-11-12): each tile of Far Cry 4's read-back grid (banjo_renut_readback_previous_frame) "
+                     "holds its nearest (first half, sign a flag) and farthest (second half) view depth, larger farther "
+                     "(grid dumps, PC run pcdump). The grid is a frame or more late, so each tile's range is widened to "
+                     "the tiles within this many and to the previous grid: the nearest the least of them (its own sign "
+                     "kept), the farthest the most. A late range had left out the sky and the lights the view had "
+                     "turned to: black blocks in the sky, lights in boxes. 0: off")
+    .range(0, 16);
 REXCVAR_DEFINE_BOOL(banjo_renut_resolve_readback_any_size, true, "Banjo/Renut",
                     "fc4-nx (2026-11-11, the console's white picture): a destination of a size no readback has finished "
                     "for yet gets the newest of its formats and width, resampled. FC4's dynamic resolution "
@@ -12526,6 +12536,7 @@ struct LatestReadback {
   plume::RenderFormat host_format = plume::RenderFormat::UNKNOWN;
   std::vector<uint8_t> texels;
   uint64_t seq = 0;  // fc4-nx (2026-11-11): order of finishing (banjo_renut_resolve_readback_any_size)
+  std::vector<uint8_t> previous;  // fc4-nx (2026-11-12, banjo_renut_readback_grid_widen): the grid as read
 };
 std::unordered_map<uint64_t, LatestReadback> g_readback_latest;
 uint64_t g_readback_seq = 0;
@@ -12914,6 +12925,59 @@ void NoiseProbeResolveLocked(HostTexture *dest, const d3d::TextureFetchConstant 
   g_noise_pending = true;
 }
 
+// fc4-nx (2026-11-12, banjo_renut_readback_grid_widen): see the cvar. Non-negative halves order as their bits; the
+// first half's sign is kept apart. 'previous' holds the grid as read, for the next.
+void WidenGridLocked(std::vector<uint8_t> &texels, std::vector<uint8_t> &previous, u32 w, u32 h, int32_t radius) {
+  const size_t n = size_t(w) * h;
+  if (texels.size() < n * 4)
+    return;
+  std::vector<uint16_t> lo(n), hi(n), sign(n);
+  for (size_t i = 0; i < n; ++i) {
+    uint16_t c[2];
+    std::memcpy(c, texels.data() + i * 4, 4);
+    sign[i] = c[0] & 0x8000u;
+    lo[i] = c[0] & 0x7FFFu;
+    hi[i] = c[1] & 0x7FFFu;
+  }
+  const bool had_previous = previous.size() == n * 4;
+  std::vector<uint8_t> as_read(texels.begin(), texels.begin() + ptrdiff_t(n * 4));
+  if (had_previous)
+    for (size_t i = 0; i < n; ++i) {
+      uint16_t c[2];
+      std::memcpy(c, previous.data() + i * 4, 4);
+      lo[i] = std::min<uint16_t>(lo[i], c[0] & 0x7FFFu);
+      hi[i] = std::max<uint16_t>(hi[i], c[1] & 0x7FFFu);
+    }
+  previous = std::move(as_read);
+  const int32_t iw = int32_t(w), ih = int32_t(h);
+  std::vector<uint16_t> tlo(n), thi(n);
+  for (int32_t y = 0; y < ih; ++y)
+    for (int32_t x = 0; x < iw; ++x) {
+      uint16_t a = 0x7FFFu, b = 0;
+      for (int32_t k = std::max(0, x - radius); k <= std::min(iw - 1, x + radius); ++k) {
+        a = std::min(a, lo[size_t(y) * w + k]);
+        b = std::max(b, hi[size_t(y) * w + k]);
+      }
+      tlo[size_t(y) * w + x] = a;
+      thi[size_t(y) * w + x] = b;
+    }
+  for (int32_t y = 0; y < ih; ++y)
+    for (int32_t x = 0; x < iw; ++x) {
+      uint16_t a = 0x7FFFu, b = 0;
+      for (int32_t k = std::max(0, y - radius); k <= std::min(ih - 1, y + radius); ++k) {
+        a = std::min(a, tlo[size_t(k) * w + x]);
+        b = std::max(b, thi[size_t(k) * w + x]);
+      }
+      const size_t i = size_t(y) * w + x;
+      const uint16_t c[2] = {uint16_t(sign[i] | a), b};
+      std::memcpy(texels.data() + i * 4, c, 4);
+    }
+  static uint32_t logged = 0;
+  if (logged++ < 2)
+    RGPU_INFO("[renut] tile grid {}x{}: each tile's nearest / farthest widened to {} tiles around and the previous "
+              "grid (banjo_renut_readback_grid_widen)", w, h, radius);
+}
+
 // A readback whose frame has passed becomes its kind's latest.
 void StoreReadbackLocked(ResolveReadback &r) {
   const uint32_t host_bytes = ReadbackHostBytes(r.host_format);
@@ -12930,6 +12994,24 @@ void StoreReadbackLocked(ResolveReadback &r) {
   for (u32 y = 0; y < r.h; ++y)
     std::memcpy(l.texels.data() + size_t(y) * r.w * host_bytes, data + size_t(y) * r.row_texels * host_bytes,
                 size_t(r.w) * host_bytes);
+  // fc4-nx (2026-11-12, banjo_renut_diag_grid_dump): FC4's tile grid as read back, every N grids, to grid_<n>.bin
+  // (u32 width, u32 height, then the host texels: two halves a tile), its time in the log.
+  static const int32_t grid_dump = REXCVAR_GET(banjo_renut_diag_grid_dump);
+  static uint32_t grid_count = 0;
+  if (grid_dump > 0 && r.guest_format == 31 && r.w == 80 && (++grid_count % uint32_t(grid_dump)) == 0) {
+    const std::string name = fmt::format("grid_{:05d}.bin", grid_count / uint32_t(grid_dump));
+    if (FILE *f = std::fopen(name.c_str(), "wb")) {
+      const u32 hdr[2] = {r.w, r.h};
+      std::fwrite(hdr, sizeof(hdr), 1, f);
+      std::fwrite(l.texels.data(), 1, l.texels.size(), f);
+      std::fclose(f);
+      RGPU_INFO("[renut] grid dump {} ({}x{}, texture frame {})", name, r.w, r.h, r.frame);
+    }
+  }
+  // fc4-nx (2026-11-12, banjo_renut_readback_grid_widen): FC4's tile grid.
+  static const int32_t grid_widen = REXCVAR_GET(banjo_renut_readback_grid_widen);
+  if (grid_widen > 0 && r.guest_format == 31 && r.host_format == plume::RenderFormat::R16G16_FLOAT && r.w == 80)
+    WidenGridLocked(l.texels, l.previous, r.w, r.h, grid_widen);
   static uint64_t stored = 0;
   if (REXCVAR_GET(banjo_renut_diag_readback_stats) && stored++ % 97 < 12) {
     // fc4-nx (2026-11-10, diagnostic): the values written back, per channel (floats decoded; unorm/snorm normalised).
@@ -13063,19 +13145,15 @@ void QueueResolveReadbackLocked(HostTexture *dest, const d3d::TextureFetchConsta
   // fc4-nx (2026-11-12, banjo_renut_readback_previous_frame): FC4's tile grid gets the frame before's.
   static const bool previous_frame = REXCVAR_GET(banjo_renut_readback_previous_frame);
   if (previous_frame && guest_format == 31 && w == 80 && dest->host_format == plume::RenderFormat::R16G16_FLOAT) {
-    const auto start = std::chrono::steady_clock::now();
-    Video::WaitPreviousFrameLocked();
-    FlushResolveReadbacksLocked(r.frame);
-    static double waited_ms = 0.0;
-    static uint32_t grids = 0;
-    waited_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-    if (grids < 3)
-      RGPU_INFO("[renut] tile grid {}x{}: the frame before's readback, {:.2f} ms waiting for the GPU "
-                "(banjo_renut_readback_previous_frame)", w, h, waited_ms);
+    static uint32_t grids = 0, previous = 0;
+    if (Video::PreviousFrameDoneLocked()) {
+      FlushResolveReadbacksLocked(r.frame);
+      ++previous;
+    }
     if (++grids % 600 == 0) {
-      RGPU_INFO("[renut] tile grid: the frame before's for {} grids, {:.2f} ms a grid waiting for the GPU "
-                "(banjo_renut_readback_previous_frame)", grids, waited_ms / 600.0);
-      waited_ms = 0.0;
+      RGPU_INFO("[renut] tile grid: the frame before's for {} of the last 600 grids, an older one for the rest "
+                "(banjo_renut_readback_previous_frame)", previous);
+      previous = 0;
     }
   }
   const LatestReadback *latest = nullptr;

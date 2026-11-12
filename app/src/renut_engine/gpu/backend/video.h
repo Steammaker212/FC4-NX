@@ -310,6 +310,9 @@ public:
   // fc4-nx (2026-11-12, banjo_renut_readback_previous_frame): waits until the GPU has run the frame before the one
   // being recorded (its slot's fence), as the next frame's start would; its readbacks are then finished.
   static void WaitPreviousFrameLocked();
+  // fc4-nx (2026-11-12, hw23): the same when the GPU has run that frame already (deko3d: its fence, not waited for);
+  // false when it has not. The PC waits (its GPU is a frame ahead of need).
+  static bool PreviousFrameDoneLocked();
   static UploadRing &UploadsLocked();
 
   static uint32_t AllocateTextureSlotLocked();
