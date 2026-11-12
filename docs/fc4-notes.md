@@ -965,3 +965,33 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
 - hw21 also traces a frame every 30 s (banjo_renut_diag_resolve_trace) for the white-outs' constants and resolves.
 - Switch hw21 NRO (hw20 kept as fc4-nx.hw20.nro.bak; ELF out/switch_runs/renut_hw21.elf).
 
+## Console run hw21 (2026-11-12) and hw22: the white picture found; the tile grid; respawn memory
+- hw21 (out/switch_runs/hw21: 10 clips, 4 screenshots, fc4.log + fc4.1.log; album deleted from SD): white from the
+  spawn on, black blocks in the sky, and after a respawn 1-2 fps and a black screen.
+- **The white picture (console and PC):** the traces (hw21's every 30 s) have the exposure (c48.x 3.3) and bloom
+  weight right, but from 01:25:05 the HDR target B2E6AFE0 was a 1280x1058 R16G16B16A16_UNORM host surface ("host 11"),
+  not the 1280x704 float one: the scene drew into a target clamped at 1, the 7e3 bits path was off (bits_7e3 false,
+  clamp 0) and the composite decoded clamped values as 7e3. PC: the white slowed runs (pcslow3) resolved their picture
+  from "1280x1729 fmt 11", the clean ones from "1280x704 fmt 10". FC4 reuses the surface object for another surface at
+  the same EDRAM base and pitch (its RB_COLOR_INFO format 8_8_8_8 while its D3DFORMAT still reads 7e3, and another
+  size); the host format follows the header's colour-info format (SurfaceColorFormat). Fixes:
+  banjo_renut_surface_registers_format (a colour header whose D3DFORMAT or implied host format differs from the
+  registers' is stale: the registers place it, at the target's own size), and the surface memo checks ColorInfo too.
+  pcgridp: every HDR resolve from 1280x704 host 10, bits on.
+- **Black blocks in the sky / boxed lights when turning (console and PC):** the blocks are 16x16 tiles: FC4's 80x44
+  16_16_FLOAT grid read back by the CPU. sub_838B6B48 (decompiled from the recompiled PPC) unpacks the two halves per
+  tile, keeps their signs as flags, stores their absolute values and marks a tile uniform when both are 0 or both a
+  constant: per-tile decisions. Renut gave it a grid three frames old, and under the dynamic resolution the last grid
+  of the same height (often seconds old). PC with frame_sleep 50 and the sticks wandering from 70 s reproduces the
+  blocks; widening each tile's range (tried, pcgrid8) made them far worse (161 flat black tiles against 12: the widening
+  also zeroed the sign flags). banjo_renut_readback_previous_frame: the grid's resolve waits for the GPU to finish the
+  frame before (0.01-0.12 ms on PC) and the CPU gets that frame's grid; and the newest grid of the width is used even
+  when the size has an older one. pcgridr against pcgrid0 (same camera path): the blocks at 110 / 112 s and the black
+  leaves at 128-134 s gone, one patch left at 116 s (the slowed PC runs at 6-8 fps: a frame is 150 ms of turning).
+- **Respawn:** the GPU region at its 1,024 MB cap, the upload rings' 16 MB buffers failed 17,700 times (hw20: 1,636)
+  and the render thread took 790 ms a frame. deko3d's memory-pressure callback now also requests the texture relief
+  (textures nothing drew with for a second, rebuilt from guest memory when bound). The 1280x1058 junk targets (21 draws
+  a frame) are gone with the format fix.
+- Depth compression on again (hw21's test: not the blocks; colour to depth 10 ms instead of 6). Trace every 60 s.
+- Switch hw22 NRO (hw21 kept as fc4-nx.hw21.nro.bak; ELF out/switch_runs/renut_hw22.elf).
+

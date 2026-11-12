@@ -1145,6 +1145,13 @@ plume::RenderCommandList *Video::CommandListLocked() {
   return State().command_list;
 }
 
+// fc4-nx (2026-11-12): see video.h. The slot's frame end (SubmitFrameLocked) then finds it waited for already and
+// drains it as before.
+void Video::WaitPreviousFrameLocked() {
+  auto &s = State();
+  detail::WaitSlotLocked(s, (s.frame + kFramesInFlight - 1) % kFramesInFlight);
+}
+
 UploadRing &Video::UploadsLocked() {
   auto &s = State();
   return s.uploads[s.frame];

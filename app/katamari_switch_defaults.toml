@@ -154,10 +154,9 @@ banjo_renut_half_pixel_offset = true
 banjo_renut_point_minmax_radius = true
 banjo_deko3d_draw_resolves = true
 banjo_gpu_depth_words_view = true
-# fc4-nx (2026-11-12, hw21 test): off. plume never resolves compressed depth (dkCmdBufResolveDepthValues) before FC4
-# samples it (lights, decals, sky, particles, fog): the suspect for the boxes left after Zcull went off in hw19 (boxed
-# fire light on leaves, black blocks in the sky when turning). SwitchWakerHD's defaults had it off as not verified.
-banjo_deko3d_depth_compression = false
+# fc4-nx (2026-11-12): hw21 had it off as a test; the sky blocks stayed (they are the late depth grid,
+# banjo_renut_readback_depth_dilate) and colour to depth took 10 ms instead of 6: on again.
+banjo_deko3d_depth_compression = true
 # fc4-nx (2026-11-12, hw18 clips): Zcull off. With it the console drew whole tiles wrong: black blocks and staircases in
 # the sky, boxed leaves, a blocky wound decal, blocky shadows, smoke over what is in front of it (FC4 tests GEQUAL on a
 # reversed-Z half-resolution depth filled by shaders, and binds depth images through several targets). The PC (no
@@ -226,7 +225,7 @@ renut_gpu_profile = 30.0
 # hw21: on every 30 s (one short hitch each) for the white-outs: the composite's exposure / bloom constants and the
 # HDR picture's resolve path in the log while the picture is blown out (hw15 had it off for its hitches at 8-20 s).
 banjo_renut_diag_resolve_trace = true
-banjo_renut_diag_resolve_trace_every_s = 30
+banjo_renut_diag_resolve_trace_every_s = 60  # hw22: 60
 banjo_renut_diag_readback_stats = false
 banjo_renut_diag_gpu_shaders = false
 target_refreshRate = -1

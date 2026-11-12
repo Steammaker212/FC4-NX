@@ -99,6 +99,13 @@ REXCVAR_DEFINE_INT32(banjo_renut_resolve_readback_texels, 4096, "Banjo/Renut",
                      "memory three frames later, in the destination's format, tiling and endianness, for games that read "
                      "them with the CPU (the last finished one of each kind goes into each new destination at its resolve). 0: off")
     .range(0, 1 << 22);
+REXCVAR_DEFINE_BOOL(banjo_renut_readback_previous_frame, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-12): Far Cry 4's CPU reads back an 80x44 16_16_FLOAT grid every frame (two "
+                    "values per 16x16-pixel tile, flags in their signs: sub_838B6B48) and decides per tile from it. "
+                    "Renut gave it a grid three frames old: at the console's 13 fps the tiles were 300 ms behind the "
+                    "view, and whenever it turned they came out black in the sky and lights came in boxes. Now the "
+                    "grid's resolve waits for the GPU to finish the frame before (as the next frame's start would) "
+                    "and the CPU gets that frame's grid, as on the console (it reads after its fence)");
 REXCVAR_DEFINE_BOOL(banjo_renut_resolve_readback_any_size, true, "Banjo/Renut",
                     "fc4-nx (2026-11-11, the console's white picture): a destination of a size no readback has finished "
                     "for yet gets the newest of its formats and width, resampled. FC4's dynamic resolution "
@@ -12960,11 +12967,12 @@ void StoreReadbackLocked(ResolveReadback &r) {
   r.buffer->unmap();
 }
 
-// Keeps the readbacks whose frame has passed; called at each resolve.
-void FlushResolveReadbacksLocked() {
+// Keeps the readbacks whose frame has passed; called at each resolve. fc4-nx (2026-11-12): 'finished_before', a frame
+// the GPU has run every frame before (banjo_renut_readback_previous_frame); else three frames back.
+void FlushResolveReadbacksLocked(uint64_t finished_before = 0) {
   const uint64_t now = TextureFrameLocked();
   for (size_t i = 0; i < g_readbacks.size();) {
-    if (now >= g_readbacks[i].frame + 3) {
+    if (now >= g_readbacks[i].frame + 3 || g_readbacks[i].frame < finished_before) {
       StoreReadbackLocked(g_readbacks[i]);
       g_readback_pool.push_back(std::move(g_readbacks[i]));
       g_readbacks.erase(g_readbacks.begin() + ptrdiff_t(i));
@@ -13052,12 +13060,33 @@ void QueueResolveReadbackLocked(HostTexture *dest, const d3d::TextureFetchConsta
   // taken the work, before the host GPU has run it: the last finished readback of this kind goes into the new
   // destination now (a few frames old; Far Cry 4 reads its 80x44 luminance grid every frame from a new page, and its
   // auto-exposure climbed toward its maximum on zeros: the white picture). Old destinations are never written late.
+  // fc4-nx (2026-11-12, banjo_renut_readback_previous_frame): FC4's tile grid gets the frame before's.
+  static const bool previous_frame = REXCVAR_GET(banjo_renut_readback_previous_frame);
+  if (previous_frame && guest_format == 31 && w == 80 && dest->host_format == plume::RenderFormat::R16G16_FLOAT) {
+    const auto start = std::chrono::steady_clock::now();
+    Video::WaitPreviousFrameLocked();
+    FlushResolveReadbacksLocked(r.frame);
+    static double waited_ms = 0.0;
+    static uint32_t grids = 0;
+    waited_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    if (grids < 3)
+      RGPU_INFO("[renut] tile grid {}x{}: the frame before's readback, {:.2f} ms waiting for the GPU "
+                "(banjo_renut_readback_previous_frame)", w, h, waited_ms);
+    if (++grids % 600 == 0) {
+      RGPU_INFO("[renut] tile grid: the frame before's for {} grids, {:.2f} ms a grid waiting for the GPU "
+                "(banjo_renut_readback_previous_frame)", grids, waited_ms / 600.0);
+      waited_ms = 0.0;
+    }
+  }
   const LatestReadback *latest = nullptr;
   if (auto it = g_readback_latest.find(ReadbackKey(w, h, guest_format, dest->host_format));
       it != g_readback_latest.end())
     latest = &it->second;
   static const bool any_size = REXCVAR_GET(banjo_renut_resolve_readback_any_size);
-  if (any_size && !latest) {  // fc4-nx (2026-11-11): none of this size yet: the newest of these formats and width
+  // fc4-nx (2026-11-12): the newest of this width and these formats even when this size has one: under FC4's dynamic
+  // resolution the grid changes height every few frames, and this size's own last readback was often seconds old (the
+  // tiles of a view long gone: black blocks in the sky). The exact size only when it is the newest.
+  if (any_size) {
     // (FC4's luminance grid is 80 wide at any height; its other CPU-read 16_16_FLOAT resolves, 60 wide, stay apart)
     for (const auto &[key, l] : g_readback_latest)
       if (l.w == w && l.guest_format == guest_format && l.host_format == dest->host_format &&

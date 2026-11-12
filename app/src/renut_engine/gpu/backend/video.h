@@ -307,6 +307,9 @@ public:
   static void KickLocked();
   static void NoteDrawLocked();
   static plume::RenderCommandList *CommandListLocked();
+  // fc4-nx (2026-11-12, banjo_renut_readback_previous_frame): waits until the GPU has run the frame before the one
+  // being recorded (its slot's fence), as the next frame's start would; its readbacks are then finished.
+  static void WaitPreviousFrameLocked();
   static UploadRing &UploadsLocked();
 
   static uint32_t AllocateTextureSlotLocked();

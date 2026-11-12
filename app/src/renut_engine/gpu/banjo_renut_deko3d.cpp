@@ -472,7 +472,13 @@ void InstallShaderCache() {
   options.asyncCacheReads = Deko3DAsyncCacheReadsOn();     // 2026-10-23
   plume::Deko3DSetOptions(options);
   // banjo-nx (2026-10-28, the console's OOM): a block that finds no room in the heap gets the spare command buffers'.
-  plume::Deko3DSetMemoryPressureCallback(+[] { ::renut::gpu::ReleaseSpareBuffersNow(); });
+  // fc4-nx (2026-11-12, hw21 respawn): and the textures nothing drew with for a second (at the render thread's next
+  // frame). At a respawn FC4 loads the area's textures again while the old ones were still held: the GPU region at its
+  // cap, the upload rings' 16 MB buffers failed (12,000 times), and the render thread took 790 ms a frame.
+  plume::Deko3DSetMemoryPressureCallback(+[] {
+    ::renut::gpu::ReleaseSpareBuffersNow();
+    ::renut::gpu::RequestTextureRelief();
+  });
   // fc4-nx (2026-11-10): a guest heap commit that finds no room: the spare buffers, the textures nothing drew with for a
   // second (at the render thread's next frame) and deko3d's empty chunks go back (sdk guest_memory_switch.cpp).
 #if defined(__SWITCH__)

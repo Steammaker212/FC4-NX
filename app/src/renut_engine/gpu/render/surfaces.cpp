@@ -42,6 +42,11 @@ REXCVAR_DEFINE_BOOL(banjo_renut_resolve_extents, true, "Banjo/Renut",
                     "makes every target of that view's shape that large from its next use. Far Cry 4 tiles its "
                     "G-buffer (two tiles in 880-wide surfaces) and resolves the second tile at 864-1280, which an "
                     "880-wide target never drew: a third of the picture garbage. false: targets keep the surface size");
+REXCVAR_DEFINE_BOOL(banjo_renut_surface_registers_format, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-12): with banjo_renut_surface_registers, a colour surface header whose format "
+                    "is not the one the slot's RB_COLOR_INFO names is another surface's (FC4 makes 8_8_8_8 surfaces "
+                    "over its HDR target's EDRAM base and pitch): the registers place the target, at the size of the "
+                    "target already there. Without it the HDR scene drew into an 8-bit target and came out white");
 REXCVAR_DEFINE_BOOL(banjo_renut_surface_registers, true, "Banjo/Renut",
                     "fc4-nx (2026-11-11): the targets of draws and resolves placed by the device's register copies "
                     "(RB_SURFACE_INFO, RB_COLOR_INFO / RB_DEPTH_INFO, written at the bind) when the surface header in "
@@ -207,6 +212,7 @@ void ForgetFramebuffers(const HostSurface *surface) {
 // built, retired, unused or rebound, the resolution scale latched and the tiling extent set).
 struct SurfaceMemo {
   u32 va = 0, size = 0, info = 0, format = 0;
+  u32 color_info = 0;  // fc4-nx (2026-11-12): the EDRAM base and format the target was found by
   uint64_t epoch = 0;
   HostSurface *surface = nullptr;
 };
@@ -894,7 +900,7 @@ HostSurface *GetHostSurfaceLocked(u32 surface_va) {
   const bool memo = banjo::renut_gpu::CpuMemosOn();
   SurfaceMemo &m = g_surface_memo[(surface_va * 0x9E3779B1u) >> 26];
   if (memo && m.epoch == g_surface_epoch && m.va == surface_va && m.size == desc->Size &&
-      m.info == desc->SurfaceInfo && m.format == desc->Format) {
+      m.info == desc->SurfaceInfo && m.format == desc->Format && m.color_info == u32(desc->ColorInfo)) {
     // the same as the lookup's: the surface bound now
     m.surface->size_word = desc->Size;
     m.surface->info_word = desc->SurfaceInfo;
@@ -912,6 +918,7 @@ HostSurface *GetHostSurfaceLocked(u32 surface_va) {
     m.size = desc->Size;
     m.info = desc->SurfaceInfo;
     m.format = desc->Format;
+    m.color_info = u32(desc->ColorInfo);
     m.epoch = g_surface_epoch;
     m.surface = result;
   }
@@ -968,8 +975,23 @@ HostSurface *GetHostSurfaceRegsLocked(u32 surface_va, u32 surface_info, u32 targ
     return GetHostSurfaceLocked(surface_va);
   const u32 pitch = u32(h->SurfaceInfo) & 0x3FFF;
   const bool header_depth = d3d::IsDepthFormat(h->Format);
+  // fc4-nx (2026-11-12, hw22, banjo_renut_surface_registers_format): a colour header whose format is not the one the
+  // slot's RB_COLOR_INFO names belongs to another surface FC4 made over the same EDRAM base and pitch (an 8_8_8_8
+  // 1280x1058 / 1280x1729 one): taken as it was, the HDR scene drew into an 8-bit target of that size and its picture
+  // came out white (hw20 / hw21 from the spawn on, PC run pcslow3). Its size is that surface's too.
+  // The host format follows the header's RB_COLOR_INFO format (SurfaceColorFormat), which FC4's reused object had as
+  // 8_8_8_8 while its D3DFORMAT still read 7e3: either one other than the registers' marks the header.
+  static const bool by_format = REXCVAR_GET(banjo_renut_surface_registers_format);
+  bool foreign_format = false;
+  if (by_format && !depth_slot && !header_depth) {
+    d3d::SurfaceDesc as_bound;
+    std::memcpy(&as_bound, h, sizeof(as_bound));
+    as_bound.ColorInfo = target_info;
+    as_bound.SurfaceInfo = surface_info;
+    foreign_format = !ColorFormatMatches(h->Format, target_info) || SurfaceColorFormat(*h) != SurfaceColorFormat(as_bound);
+  }
   const bool stale = !pitch || (u32(h->ColorInfo) & 0xFFF) != (target_info & 0xFFF) ||
-                     (exact_pitch && pitch != reg_pitch) || header_depth != depth_slot;
+                     (exact_pitch && pitch != reg_pitch) || header_depth != depth_slot || foreign_format;
   if (!stale)
     return GetHostSurfaceLocked(surface_va);
   if (depth_slot && !header_depth)
@@ -978,8 +1000,8 @@ HostSurface *GetHostSurfaceRegsLocked(u32 surface_va, u32 surface_info, u32 targ
   std::memcpy(&d, h, sizeof(d));
   d.SurfaceInfo = surface_info;
   d.ColorInfo = target_info;
-  if (d3d::SurfaceWidth(d.Size) > reg_pitch || d3d::SurfaceHeight(d.Size) > 2048)
-    d.Size = ((reg_pitch - 1) << 18) | ((16u - 1) << 3);  // the pitch wide: the view's target keeps its own size
+  if (foreign_format || d3d::SurfaceWidth(d.Size) > reg_pitch || d3d::SurfaceHeight(d.Size) > 2048)
+    d.Size =((reg_pitch - 1) << 18) | ((16u - 1) << 3);  // the pitch wide: the view's target keeps its own size
   if (!depth_slot && !ColorFormatMatches(d.Format, target_info))
     d.Format = ColorFormatWord(target_info);
   ++g_register_overrides;
