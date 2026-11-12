@@ -303,6 +303,9 @@ function(renut_gpu_setup TARGET)
     # banjo-nx (2026-10-21, internal resolution): the 3D image scaled to the display's resolution (render/ui_scale.cpp).
     renut_host_shader(${TARGET} ui_upscale_ps ps_6_0)
     renut_host_shader(${TARGET} ui_upscale_bicubic_ps ps_6_0)
+    # fc4-nx (2026-11-12, hw24): the FSR 1-style upscale (banjo_renut_upscale_filter 2).
+    renut_host_shader(${TARGET} ui_upscale_easu_ps ps_6_0)
+    renut_host_shader(${TARGET} ui_upscale_rcas_ps ps_6_0)
     renut_host_shader(${TARGET} ui_depth_upscale_ps ps_6_0)
     renut_host_shader(${TARGET} color_to_depth_ps ps_6_0)  # fc4-nx (2026-11-10, banjo_renut_color_to_depth)
     renut_host_shader(${TARGET} rectangle_list_gs gs_6_0)

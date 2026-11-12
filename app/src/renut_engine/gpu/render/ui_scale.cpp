@@ -7,12 +7,14 @@
 // internal resolution (surfaces.cpp, LatchResolutionScaleLocked; the post-processing buffers and shadow maps keep the
 // console's sizes); right after the composite and SMAA (render/smaa.cpp) one full-screen pass scales the composite's
 // target into its UI target at the display's resolution (shaders/host/ui_upscale_ps.hlsl: bilinear, one sample a pixel,
-// the user's choice in every config; ui_upscale_bicubic_ps.hlsl with banjo_renut_upscale_filter 1), and the rest of the
+// the user's choice in every config; ui_upscale_bicubic_ps.hlsl with banjo_renut_upscale_filter 1; fc4-nx 2026-11-12:
+// with 2, ui_upscale_easu_ps.hlsl into a texture at the display's size, then ui_upscale_rcas_ps.hlsl), and the rest of the
 // frame's lookups of that target answer the UI target
 // (RedirectToUiSurfaceLocked): the HUD, its clears and the resolve to the front buffer, which the present shows as it is.
 // Recorded like render/smaa.cpp: the utility layout, its bindless tables and push block.
 #include "renut_engine/gpu/render/ui_scale.h"
 
+#include <cmath>
 #include <memory>
 #include <unordered_map>
 
@@ -28,18 +30,24 @@
 #include "host_shaders/smaa_vs.spirv.h"
 #include "host_shaders/ui_depth_upscale_ps.spirv.h"
 #include "host_shaders/ui_upscale_bicubic_ps.spirv.h"
+#include "host_shaders/ui_upscale_easu_ps.spirv.h"
 #include "host_shaders/ui_upscale_ps.spirv.h"
+#include "host_shaders/ui_upscale_rcas_ps.spirv.h"
 #if defined(PLUME_DEKO3D)
 #include "host_shaders/smaa_vs.deko3d.h"
 #include "host_shaders/ui_depth_upscale_ps.deko3d.h"
 #include "host_shaders/ui_upscale_bicubic_ps.deko3d.h"
+#include "host_shaders/ui_upscale_easu_ps.deko3d.h"
 #include "host_shaders/ui_upscale_ps.deko3d.h"
+#include "host_shaders/ui_upscale_rcas_ps.deko3d.h"
 #endif
 #if defined(_WIN32)
 #include "host_shaders/smaa_vs.dxil.h"
 #include "host_shaders/ui_depth_upscale_ps.dxil.h"
 #include "host_shaders/ui_upscale_bicubic_ps.dxil.h"
+#include "host_shaders/ui_upscale_easu_ps.dxil.h"
 #include "host_shaders/ui_upscale_ps.dxil.h"
+#include "host_shaders/ui_upscale_rcas_ps.dxil.h"
 #endif
 
 namespace renut::gpu {
@@ -47,7 +55,16 @@ namespace {
 
 struct UiScalePass {
   bool failed = false;  // a shader could not be made: the HUD stays at the internal resolution
-  std::unique_ptr<plume::RenderShader> vs, ps[2];  // bilinear, bicubic (banjo_renut_upscale_filter)
+  std::unique_ptr<plume::RenderShader> vs, ps[4];  // bilinear, bicubic, FSR's EASU and RCAS (banjo_renut_upscale_filter)
+  // fc4-nx (2026-11-12, filter 2): the EASU pass's texture at the display's size, its view, slot, layout, framebuffer.
+  std::unique_ptr<plume::RenderTexture> fsr_texture;
+  std::unique_ptr<plume::RenderTextureView> fsr_view;
+  uint32_t fsr_slot = kInvalidDescriptor;
+  plume::RenderTextureLayout fsr_layout = plume::RenderTextureLayout::UNKNOWN;
+  std::unique_ptr<plume::RenderFramebuffer> fsr_framebuffer;
+  uint32_t fsr_width = 0, fsr_height = 0;
+  plume::RenderFormat fsr_format = plume::RenderFormat::UNKNOWN;
+  bool fsr_failed = false;
   std::unordered_map<uint32_t, std::unique_ptr<plume::RenderPipeline>> pipelines;  // by the target's format and filter
   // The UI target's framebuffer, for the surface and generation it was made for.
   const HostSurface *target = nullptr;
@@ -69,13 +86,17 @@ plume::RenderPipeline *Pipeline(VideoState &s, plume::RenderFormat format, uint3
     p.vs = CreateHostShader(s.device.get(), RENUT_HOST_SHADER(smaa_vs), "smaa_vs");
     p.ps[0] = CreateHostShader(s.device.get(), RENUT_HOST_SHADER(ui_upscale_ps), "ui_upscale_ps");
     p.ps[1] = CreateHostShader(s.device.get(), RENUT_HOST_SHADER(ui_upscale_bicubic_ps), "ui_upscale_bicubic_ps");
+    p.ps[2] = CreateHostShader(s.device.get(), RENUT_HOST_SHADER(ui_upscale_easu_ps), "ui_upscale_easu_ps");
+    p.ps[3] = CreateHostShader(s.device.get(), RENUT_HOST_SHADER(ui_upscale_rcas_ps), "ui_upscale_rcas_ps");
+    if (!p.ps[2] || !p.ps[3])
+      p.fsr_failed = true;  // fc4-nx (2026-11-12): bilinear instead
     if (!p.vs || !p.ps[0] || !p.ps[1]) {
       p.failed = true;
       RGPU_WARN("[renut] the upscale's shaders could not be made: the HUD stays at the internal resolution");
       return nullptr;
     }
   }
-  auto &pipeline = p.pipelines[uint32_t(format) << 1 | filter];
+  auto &pipeline = p.pipelines[uint32_t(format) << 2 | filter];
   if (!pipeline) {
     plume::RenderGraphicsPipelineDesc desc;
     desc.pipelineLayout = s.utility_layout.get();
@@ -96,6 +117,38 @@ plume::RenderPipeline *Pipeline(VideoState &s, plume::RenderFormat format, uint3
     pipeline->setName("renut UI upscale");
   }
   return pipeline.get();
+}
+
+// fc4-nx (2026-11-12, banjo_renut_upscale_filter 2): the EASU pass's texture, made again for another size or format.
+bool FsrTexture(VideoState &s, uint32_t width, uint32_t height, plume::RenderFormat format) {
+  UiScalePass &p = g_pass;
+  if (p.fsr_texture && p.fsr_framebuffer && p.fsr_width == width && p.fsr_height == height && p.fsr_format == format)
+    return true;
+  p.fsr_framebuffer.reset();
+  if (p.fsr_slot != kInvalidDescriptor)
+    Video::FreeTextureSlotLocked(p.fsr_slot);
+  p.fsr_slot = kInvalidDescriptor;
+  p.fsr_view.reset();
+  p.fsr_texture = s.device->createTexture(plume::RenderTextureDesc::ColorTarget(width, height, format));
+  p.fsr_layout = plume::RenderTextureLayout::UNKNOWN;
+  p.fsr_width = width;
+  p.fsr_height = height;
+  p.fsr_format = format;
+  if (!p.fsr_texture)
+    return false;
+  p.fsr_texture->setName("renut FSR upscale");
+  p.fsr_view = p.fsr_texture->createTextureView(plume::RenderTextureViewDesc::Texture2D(format));
+  if (!p.fsr_view)
+    return false;
+  p.fsr_slot = Video::AllocateTextureSlotLocked();
+  if (p.fsr_slot == kInvalidDescriptor)
+    return false;
+  Video::SetTextureSlotLocked(p.fsr_slot, p.fsr_texture.get(), p.fsr_view.get());
+  const plume::RenderTexture *colors[1] = {p.fsr_texture.get()};
+  p.fsr_framebuffer = s.device->createFramebuffer(plume::RenderFramebufferDesc(colors, 1, nullptr));
+  if (p.fsr_framebuffer)
+    RGPU_INFO("[renut] FSR upscale: its texture at {}x{} (banjo_renut_upscale_filter 2)", width, height);
+  return p.fsr_framebuffer != nullptr;
 }
 
 plume::RenderPipeline *DepthPipeline(VideoState &s, plume::RenderFormat format) {
@@ -210,9 +263,19 @@ bool UiScaleAfterCompositeLocked(HostSurface *surface) {
       banjo::renut_gpu::CountUiUpscale(false);
     return false;
   }
-  const uint32_t filter = banjo::renut_gpu::UpscaleFilter() ? 1u : 0u;
+  const int wanted = banjo::renut_gpu::UpscaleFilter();
+  uint32_t filter = wanted >= 2 ? 2u : wanted == 1 ? 1u : 0u;
   plume::RenderPipeline *pipeline = Pipeline(s, surface->format, filter);
   if (!pipeline)
+    return false;
+  if (filter == 2 && g_pass.fsr_failed) {  // fc4-nx (2026-11-12): no FSR shaders or texture: bilinear
+    filter = 0;
+    pipeline = Pipeline(s, surface->format, 0);
+    if (!pipeline)
+      return false;
+  }
+  plume::RenderPipeline *rcas = filter == 2 ? Pipeline(s, surface->format, 3) : nullptr;
+  if (filter == 2 && !rcas)
     return false;
   HostSurface *ui = UiSurfaceLocked(surface);
   const uint32_t source_slot = SurfaceSampleSlotLocked(surface);
@@ -249,6 +312,15 @@ bool UiScaleAfterCompositeLocked(HostSurface *surface) {
   const uint32_t source_height = surface->scale.Size(surface->height);
   const uint32_t width = ui->scale.Size(ui->width);
   const uint32_t height = ui->scale.Size(ui->height);
+  // fc4-nx (2026-11-12, filter 2): EASU into the FSR texture, then RCAS from it into the UI target.
+  const bool fsr = filter == 2 && FsrTexture(s, width, height, ui->format);
+  if (filter == 2 && !fsr) {
+    p.fsr_failed = true;
+    RGPU_WARN("[renut] FSR upscale: its texture could not be made: bilinear from now on");
+    pipeline = Pipeline(s, surface->format, 0);
+    if (!pipeline)
+      return false;
+  }
   UtilityPush push{};
   push.scale[0] = 1.0f / float(source_width);
   push.scale[1] = 1.0f / float(source_height);
@@ -259,12 +331,32 @@ bool UiScaleAfterCompositeLocked(HostSurface *surface) {
   cmd->setGraphicsPipelineLayout(s.utility_layout.get());
   cmd->setGraphicsDescriptorSet(s.texture_set.get(), 0);
   cmd->setGraphicsDescriptorSet(s.sampler_set.get(), 1);
-  cmd->setFramebuffer(p.framebuffer.get());
+  if (fsr && p.fsr_layout != plume::RenderTextureLayout::COLOR_WRITE) {
+    const plume::RenderTextureBarrier to_write(p.fsr_texture.get(), plume::RenderTextureLayout::COLOR_WRITE);
+    cmd->barriers(plume::RenderBarrierStage::GRAPHICS, nullptr, 0, &to_write, 1);
+    p.fsr_layout = plume::RenderTextureLayout::COLOR_WRITE;
+  }
+  cmd->setFramebuffer(fsr ? p.fsr_framebuffer.get() : p.framebuffer.get());
   cmd->setViewports(plume::RenderViewport(0.0f, 0.0f, float(width), float(height)));
   cmd->setScissors(plume::RenderRect(0, 0, int32_t(width), int32_t(height)));
   cmd->setPipeline(pipeline);
   cmd->setGraphicsPushConstants(0, &push, 0, sizeof(push));
   cmd->drawInstanced(3, 1, 0, 0);
+  if (fsr) {
+    const plume::RenderTextureBarrier to_read(p.fsr_texture.get(), plume::RenderTextureLayout::SHADER_READ);
+    cmd->barriers(plume::RenderBarrierStage::GRAPHICS, nullptr, 0, &to_read, 1);
+    p.fsr_layout = plume::RenderTextureLayout::SHADER_READ;
+    push.scale[0] = 1.0f / float(width);
+    push.scale[1] = 1.0f / float(height);
+    push.translate[0] = float(width);
+    push.translate[1] = float(height);
+    push.texture_index = p.fsr_slot;
+    push.param0 = std::exp2(-banjo::renut_gpu::FsrSharpness());
+    cmd->setFramebuffer(p.framebuffer.get());
+    cmd->setPipeline(rcas);
+    cmd->setGraphicsPushConstants(0, &push, 0, sizeof(push));
+    cmd->drawInstanced(3, 1, 0, 0);
+  }
 
   ++ui->writes;  // banjo_renut_resolve_skip: the target changed
   RedirectToUiSurfaceLocked();

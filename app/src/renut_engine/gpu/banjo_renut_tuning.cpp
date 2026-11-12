@@ -300,8 +300,14 @@ REXCVAR_DEFINE_BOOL(banjo_renut_host_mips, true, "Banjo/Enhancements",
 REXCVAR_DEFINE_INT32(banjo_renut_upscale_filter, 0, "Banjo/Enhancements",
                      "The scaling of the 3D image from banjo_renut_render_height_* to the display's resolution "
                      "(2026-10-21): 0 = bilinear (one sample a pixel: the cheapest; the user's choice, every config), "
-                     "1 = bicubic Catmull-Rom (five bilinear samples a pixel, sharper)")
-    .range(0, 1);
+                     "1 = bicubic Catmull-Rom (five bilinear samples a pixel, sharper), 2 = FSR 1-style (fc4-nx "
+                     "2026-11-12: edge-adaptive upsampling, 12 texels a pixel, then contrast-adaptive sharpening, "
+                     "banjo_renut_fsr_sharpness; render/ui_scale.cpp)")
+    .range(0, 2);
+REXCVAR_DEFINE_DOUBLE(banjo_renut_fsr_sharpness, 0.25, "Banjo/Enhancements",
+                      "fc4-nx (2026-11-12): banjo_renut_upscale_filter 2's sharpening in stops below the strongest: 0 "
+                      "the most, 2 a quarter of it")
+    .range(0.0, 4.0);
 REXCVAR_DEFINE_INT32(banjo_renut_diag_smaa_compare_s, 0, "Banjo/Diagnostics",
                      "banjo_renut_smaa comparison pictures (2026-10-21): every N seconds the same frame's 3D image "
                      "before and after SMAA (the HUD not drawn yet) as capturas/smaa_NNN_off.tga and _on.tga next to "
@@ -1237,7 +1243,7 @@ void StatsGameFrame() {
                   "{} upscale, not exact): {} composites scaled up for the HUD, {} drawn at the display's resolution, "
                   "{} depth targets scaled up for 3D drawn after the composite, {} draws testing a smaller depth "
                   "target", heights, DisplayHeightDocked(),
-                  UpscaleFilter() ? "bicubic" : "bilinear", scaled, full, depth, kept);
+                  UpscaleFilter() == 2 ? "FSR" : UpscaleFilter() ? "bicubic" : "bilinear", scaled, full, depth, kept);
   }
   if (PushConstantsOn()) {
     REXLOG_INFO("[renut] pushed constants (banjo_deko3d_push_constants): {} draws, {:.1f} KB of float constants and "
@@ -1527,6 +1533,7 @@ int32_t RenderHeightHandheld() { return REXCVAR_GET(banjo_renut_render_height_ha
 int32_t RenderHeightDocked() { return REXCVAR_GET(banjo_renut_render_height_docked); }
 int32_t DisplayHeightDocked() { return REXCVAR_GET(banjo_renut_display_height_docked); }
 int UpscaleFilter() { return REXCVAR_GET(banjo_renut_upscale_filter); }
+float FsrSharpness() { return float(REXCVAR_GET(banjo_renut_fsr_sharpness)); }  // fc4-nx (2026-11-12)
 bool HostMipsOn() {
   static const bool on = REXCVAR_GET(banjo_renut_host_mips);
   return on;

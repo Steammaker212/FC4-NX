@@ -3,6 +3,7 @@
  */
 #include "renut_engine/gpu/render/graphics_options.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <string>
 
@@ -13,6 +14,10 @@
 #include "renut_engine/gpu/guest/widescreen.h"
 #include "renut_engine/gpu/render/format.h"
 
+REXCVAR_DEFINE_BOOL(banjo_renut_scale_by_pitch, true, "Banjo/Renut",
+                    "fc4-nx (2026-11-12, hw24): the post-processing-buffer size rule (1x) takes the wider of the "
+                    "surface's width and its pitch: FC4's stencil-marking draws bind a 640-pitch surface whose header "
+                    "reads 320 wide or less beside the 0.75x half-resolution depth (the black frames of hw23)");
 REXCVAR_DEFINE_STRING(renut_shadow_resolution, "Resolution", "Nuts&Bolts/Graphics",
                       "Shadow map resolution, as a multiple of the console's: Resolution follows "
                       "renut_resolution; 1x is the console's; 2x, 3x and 4x are sharper.")
@@ -172,16 +177,25 @@ RenderScale SurfaceRenderScale(const d3d::SurfaceDesc &desc, RenderScale resolut
     return resolution;  // multisampled: the scene's
   const u32 width = d3d::SurfaceWidth(desc.Size);
   const u32 height = d3d::SurfaceHeight(desc.Size);
+  // fc4-nx (2026-11-12, hw24, banjo_renut_scale_by_pitch): the size rules below by the surface's pitch (RB_SURFACE_INFO)
+  // where it is wider than the header's width. FC4's stencil-marking draw (VS 793395BDBC0250CA, no pixel shader,
+  // RB_DEPTHCONTROL 00700203) binds a colour surface whose header reads size 0 (1x1) with pitch 640: taken as a
+  // post-processing buffer it was made at 1x (grown to 640x352 by the resolves) beside the 0.75x half-resolution depth,
+  // so the stencil marks landed at the wrong scale and the lighting that tests them left the frame black (hw23's
+  // flashes; PC at 2/3: both flashes of pcscale3 right after that draw, pcpitch_true none of those draws).
+  const u32 pitch = u32(desc.SurfaceInfo) & 0x3FFF;
+  static const bool by_pitch = REXCVAR_GET(banjo_renut_scale_by_pitch);
+  const u32 rule_width = by_pitch ? std::max(width, pitch) : width;
   if (IsShadowMap(desc, width, height))
     return g_latched.shadow_follows_resolution ? resolution : g_latched.shadow_scale;
   if (g_latched.full_ambient_occlusion && IsAmbientOcclusion(desc, width, height))
     return resolution.Times(2);
-  if (IsPostProcessBuffer(desc, width, height))
+  if (IsPostProcessBuffer(desc, rule_width, height))
     return {};  // the console's
   // banjo-nx (2026-10-21, package 36z2): a depth target of a quarter of the screen or less goes with the colour targets
   // of that size (the post-processing buffers' rule, which takes colour only): a 128x128 one at 0.9x under its 128x128
   // colour target at 1x cut its draws to 115x115 (console log of 36z: ten draws a frame).
-  if (IsDeko3D() && d3d::IsDepthFormat(desc.Format) && width * 4 <= GuestScreenWidth() &&
+  if (IsDeko3D() && d3d::IsDepthFormat(desc.Format) && rule_width * 4 <= GuestScreenWidth() &&
       height * 4 <= kGuestScreenHeight)
     return {};
   return resolution;

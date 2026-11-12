@@ -207,7 +207,10 @@ banjo_renut_portrait_msaa_samples = 2
 banjo_renut_render_height_handheld = 540
 banjo_renut_render_height_docked = 648
 banjo_renut_display_height_docked = 720
-banjo_renut_upscale_filter = 0
+# fc4-nx (2026-11-12, hw24, the user's request "can we implement FSR"): 2 = FSR 1-style (edge-adaptive upsampling,
+# then contrast-adaptive sharpening; render/ui_scale.cpp). 0 bilinear, 1 bicubic.
+banjo_renut_upscale_filter = 2
+banjo_renut_fsr_sharpness = 0.25
 banjo_renut_host_mips = false
 banjo_deko3d_async_variants = true
 banjo_renut_stall_present = false

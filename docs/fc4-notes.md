@@ -1026,3 +1026,27 @@ Also: the invalid-function trap now logs lr and r3 (sdk function_dispatcher.cpp)
   G-buffer materials).
 - Switch hw23 NRO (hw22 kept as fc4-nx.hw22.nro.bak; ELF out/switch_runs/renut_hw23.elf). Trace off.
 
+## Console run hw23 (2026-11-12) and hw24: the black frames, FSR
+- The user: hw23 good apart from the water; new black flashes (frames with the opaque scene unlit, sky and particles
+  drawn, the first-person weapon gone). Album (9 files) in out/switch_runs/hw23/album, deleted from the SD.
+- **Black frames found:** FC4's stencil-marking draw (VS 793395BDBC0250CA, no pixel shader, RB_DEPTHCONTROL 00700203:
+  stencil only, Z NEVER) into the half-resolution depth binds a colour surface whose header reads size 0 (1x1) with
+  pitch 640 (info 0A000280, format 18280186). SurfaceRenderScale took it as a post-processing buffer (<= 320x180: 1x);
+  the resolves grew it to 640x352 at 1x beside the 0.75x depth, so the stencil marks landed at the wrong scale and the
+  lighting that tests them left the frame black. PC at 2/3 slowed (pcscale3): both black captures (91 s, 124 s) within
+  80 ms after that draw's "smaller depth" warning. banjo_renut_scale_by_pitch (graphics_options.cpp, on): the size rule
+  takes max(width, RB_SURFACE_INFO pitch). A/B (pcpitch_false / pcpitch_true): 8 mixed-scale draws against 0, no black
+  gameplay captures with it. The warning now prints the colour header (size, info, format).
+- hw23's 1x stretches at 03:22:02-03:22:17 ("composites drawn at the display's resolution") are a loading screen
+  (KYRAT; the album clip 03:22:31 shows it), as they should be: no scale toggling in gameplay.
+- **FSR:** banjo_renut_upscale_filter 2 (Switch default now): ui_upscale_easu_ps.hlsl (edge-adaptive 12-texel
+  Lanczos-2 approximation, clamped to the 4 nearest texels) into a texture at the display's size, then
+  ui_upscale_rcas_ps.hlsl (contrast-adaptive sharpening, banjo_renut_fsr_sharpness 0.25 stops) into the UI target.
+  Renut's own code after AMD FidelityFX FSR 1.0's published algorithm (MIT); nothing downloaded. PC at 2/3 (pcfsr_2):
+  clean edges, no ringing; the texture is made again only when the UI target's size changes (4 times a run). GPU cost
+  on the console not measured yet ("UI upscale" profile label covers both passes).
+- Not done: the dark water surface (the traced hw22 frame shows the forward pass but not which draw is the water; the
+  console saves are at the start area, so PC cannot reach water yet); frame rate work (Dunia settings, FC4's dynamic
+  resolution).
+- Switch hw24 NRO (hw23 kept as fc4-nx.hw23.nro.bak; ELF out/switch_runs/renut_hw24.elf). Trace off.
+

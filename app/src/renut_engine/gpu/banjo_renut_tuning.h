@@ -333,11 +333,13 @@ bool Deko3DAsyncCacheReadsOn();  // banjo_deko3d_async_cache_reads (2026-10-23)
 void CountDrawnResolve();
 void CountSmaa();  // banjo_renut_smaa: a frame done
 // banjo-nx (2026-10-21, internal resolution, NOT exact): the 3D image's heights by mode, the display's when docked, the
-// upscale's filter (0 bilinear, 1 bicubic), and a composite scaled up for the HUD (or drawn at the display's size).
+// upscale's filter (0 bilinear, 1 bicubic, 2 FSR), and a composite scaled up for the HUD (or drawn at the display's size).
 int32_t RenderHeightHandheld();
 int32_t RenderHeightDocked();
 int32_t DisplayHeightDocked();
 int UpscaleFilter();
+float FsrSharpness();  // fc4-nx (2026-11-12): banjo_renut_fsr_sharpness, stops
+float FsrSharpness();  // fc4-nx (2026-11-12): banjo_renut_fsr_sharpness, stops
 bool HostMipsOn();  // banjo_renut_host_mips (read at start)
 void CountUiUpscale(bool scaled);
 // A UI depth target filled (true), or a draw that kept a depth target smaller than its colour target (false).

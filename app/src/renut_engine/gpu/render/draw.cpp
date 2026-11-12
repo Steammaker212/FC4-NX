@@ -1803,9 +1803,10 @@ void DropSmallerDepth(const GuestDevice &device, Targets &t, uint64_t vs_hash, u
     static uint32_t logged = 0;
     if (LogLimited(logged, 16))
       RGPU_WARN("A draw tests depth or stencil against a depth target smaller than its colour target ({}x{} at "
-                "{:.3g}x, depth {}x{} at {:.3g}x; VS {:016X} PS {:016X}, RB_DEPTHCONTROL {:08X}): kept, the draw is "
-                "cut to the depth's size", c->width, c->height, c->scale.Factor(), d->width, d->height,
-                d->scale.Factor(), vs_hash, ps_hash, dc);
+                "{:.3g}x, depth {}x{} at {:.3g}x; VS {:016X} PS {:016X}, RB_DEPTHCONTROL {:08X}; colour header size "
+                "{:08X} info {:08X} format {:08X}): kept, the draw is cut to the depth's size", c->width, c->height,
+                c->scale.Factor(), d->width, d->height, d->scale.Factor(), vs_hash, ps_hash, dc, c->size_word,
+                c->info_word, c->format_word);
     return;
   }
   if (d->scale == c->scale) {  // fc4-nx (2026-11-11): the case Maxwell clipped
